@@ -1,0 +1,1418 @@
+import { useEffect, useRef, useState, PointerEvent } from 'react';
+import { GameEngine, GameStats, StoreUpgrades, ParticleTheme, THEME_COLORS } from './lib/engine';
+import { 
+    initAudio, 
+    playPerfectBonus, 
+    playPurchaseConfirm, 
+    playSlotSpin, 
+    playSlotStop, 
+    playSlotPayout, 
+    playNearMissAlert 
+} from './lib/audio';
+import { 
+    Cpu,
+    Share2, 
+    Play, 
+    RotateCcw, 
+    Magnet, 
+    Zap, 
+    HelpCircle, 
+    ShoppingBag, 
+    Coins, 
+    Sparkles, 
+    Check, 
+    ChevronLeft, 
+    Flame, 
+    Gauge,
+    Dices,
+    AlertTriangle,
+    Trophy,
+    Shield
+} from 'lucide-react';
+
+type Screen = 'START' | 'GAME' | 'ROUND_OVER' | 'SHOP';
+
+interface ShopItem {
+    id: keyof StoreUpgrades;
+    name: string;
+    description: string;
+    levels: { cost: number; valueLabel: string }[];
+}
+
+const SHOP_ITEMS: ShopItem[] = [
+    {
+        id: 'extraSparks',
+        name: 'Cascade Spark Battery',
+        description: 'Enables dropping multiple detonators per level to restart failing reactions.',
+        levels: [
+            { cost: 0, valueLabel: '1 Spark Detonator' },
+            { cost: 800, valueLabel: '2 Spark Detonators' },
+            { cost: 2000, valueLabel: '3 Spark Detonators' }
+        ]
+    },
+    {
+        id: 'maxMagnetFuel',
+        name: 'Quantum Fuel Module',
+        description: 'Increases the gravity sweeper magnet fuel capacity.',
+        levels: [
+            { cost: 0, valueLabel: '100% Sweep capacity' },
+            { cost: 400, valueLabel: '140% Sweep capacity' },
+            { cost: 900, valueLabel: '180% Sweep capacity' },
+            { cost: 1600, valueLabel: '220% Sweep capacity' }
+        ]
+    },
+    {
+        id: 'sparkRadiusBoost',
+        name: 'Catalyst Core',
+        description: 'Enlarges the trigger spark core explosion radius.',
+        levels: [
+            { cost: 0, valueLabel: 'Base range size' },
+            { cost: 500, valueLabel: '+15% reach radius' },
+            { cost: 1000, valueLabel: '+30% reach radius' },
+            { cost: 1800, valueLabel: '+45% reach radius' }
+        ]
+    },
+    {
+        id: 'magnetPower',
+        name: 'Tractor Drive Pulse',
+        description: 'Increases speed & strength of herding gravitational pull.',
+        levels: [
+            { cost: 0, valueLabel: '1.0x baseline pull' },
+            { cost: 300, valueLabel: '1.4x faster herding' },
+            { cost: 700, valueLabel: '1.8x faster herding' },
+            { cost: 1200, valueLabel: '2.2x faster herding' }
+        ]
+    },
+    {
+        id: 'specialSpawnRate',
+        name: 'Reactor Volatility',
+        description: 'Spawns more specialty Gravity and Splitter core bubbles in grids.',
+        levels: [
+            { cost: 0, valueLabel: '30% specialty cores' },
+            { cost: 600, valueLabel: '40% specialty cores' },
+            { cost: 1400, valueLabel: '50% specialty cores' }
+        ]
+    },
+    {
+        id: 'resonanceDuration',
+        name: 'Resonance Sustain Core',
+        description: 'Extends active explosion lifetimes and holds reactions frozen for longer.',
+        levels: [
+            { cost: 0, valueLabel: '120f Baseline duration' },
+            { cost: 300, valueLabel: '+15% longer sustain' },
+            { cost: 600, valueLabel: '+30% longer sustain' },
+            { cost: 1000, valueLabel: '+45% longer sustain' }
+        ]
+    },
+    {
+        id: 'decayResist',
+        name: 'Decay Neutralizer Shield',
+        description: 'Bypasses and converts Anti-Matter Decay Cells into helpful standard explosions.',
+        levels: [
+            { cost: 0, valueLabel: '0% Shield absorption' },
+            { cost: 450, valueLabel: '25% absorb probability' },
+            { cost: 900, valueLabel: '50% absorb probability' },
+            { cost: 1500, valueLabel: '75% absorb probability' }
+        ]
+    },
+    {
+        id: 'comboShardMultiplier',
+        name: 'Combo Resonance Charger',
+        description: 'Significantly increases net Quantum Shards generated per peak combo hit.',
+        levels: [
+            { cost: 0, valueLabel: '1.0x combo bonus speed' },
+            { cost: 350, valueLabel: '+4 bonus shards per hit' },
+            { cost: 700, valueLabel: '+8 bonus shards per hit' },
+            { cost: 1200, valueLabel: '+12 bonus shards per hit' }
+        ]
+    },
+    {
+        id: 'magnetAutopilot',
+        name: 'Vortex Fuel Recycler',
+        description: 'Passively recharges sweeping magnet fuel slowly over time when not in use.',
+        levels: [
+            { cost: 0, valueLabel: 'Inert fuel depletion' },
+            { cost: 400, valueLabel: 'Slow passive recharge' },
+            { cost: 800, valueLabel: 'Medium passive recharge' },
+            { cost: 1300, valueLabel: 'Fast passive recharge' }
+        ]
+    }
+];
+
+interface ThemeShopItem {
+    id: ParticleTheme;
+    name: string;
+    description: string;
+    cost: number;
+    colors: string[];
+}
+
+const THEME_SHOP_ITEMS: ThemeShopItem[] = [
+    {
+        id: 'STANDARD',
+        name: 'Default Cybernetics',
+        description: 'Glow Cyan, Fuchsia pink, and Neon Lime atoms.',
+        cost: 0,
+        colors: ['#22d3ee', '#fb7185', '#a3e635']
+    },
+    {
+        id: 'NEBULA',
+        name: 'Stardust Nebula',
+        description: 'Galactic Rose pink, deep Violet purple, and Comet blue.',
+        cost: 700,
+        colors: ['#f472b6', '#a855f7', '#3b82f6']
+    },
+    {
+        id: 'MATRIX',
+        name: 'Hyper-Void Matrix',
+        description: 'Malware bright Green, digital Teal, and Amber sparks.',
+        cost: 1000,
+        colors: ['#22c55e', '#10b981', '#fbbf24']
+    },
+    {
+        id: 'SUPERNOVA',
+        name: 'Solar Flare Supernova',
+        description: 'Incandescent Solar orange, Crimson, and White Hot plasma.',
+        cost: 1500,
+        colors: ['#f97316', '#ef4444', '#ffffff']
+    }
+];
+
+export default function App() {
+    const [screen, setScreen] = useState<Screen>('START');
+    const [showHelp, setShowHelp] = useState(false);
+    
+    // Persistent stats
+    const [level, setLevel] = useState(1);
+    const [totalScore, setTotalScore] = useState(0);
+    const [peakCombo, setPeakCombo] = useState(0);
+    const [highScore, setHighScore] = useState(() => {
+        try {
+            const saved = localStorage.getItem('chain_reaction_high_score_v2');
+            return saved ? parseInt(saved, 10) : 0;
+        } catch {
+            return 0;
+        }
+    });
+
+    // Upgrades Currency & Stats
+    const [shards, setShards] = useState<number>(() => {
+        try {
+            const saved = localStorage.getItem('chain_reaction_shards_v3');
+            return saved ? parseInt(saved, 10) : 30; // Gift 30 shards at start for progression pacing
+        } catch {
+            return 30;
+        }
+    });
+
+    const [upgrades, setUpgrades] = useState<StoreUpgrades>(() => {
+        try {
+            const saved = localStorage.getItem('chain_reaction_upgrades_v3');
+            return saved ? JSON.parse(saved) : { extraSparks: 0, maxMagnetFuel: 0, magnetPower: 0, sparkRadiusBoost: 0, specialSpawnRate: 0, resonanceDuration: 0, decayResist: 0, comboShardMultiplier: 0, magnetAutopilot: 0 };
+        } catch {
+            return { extraSparks: 0, maxMagnetFuel: 0, magnetPower: 0, sparkRadiusBoost: 0, specialSpawnRate: 0, resonanceDuration: 0, decayResist: 0, comboShardMultiplier: 0, magnetAutopilot: 0 };
+        }
+    });
+
+    const [purchasedThemes, setPurchasedThemes] = useState<ParticleTheme[]>(() => {
+        try {
+            const saved = localStorage.getItem('chain_reaction_purchased_themes_v3');
+            return saved ? JSON.parse(saved) : ['STANDARD'];
+        } catch {
+            return ['STANDARD'];
+        }
+    });
+
+    const [activeTheme, setActiveTheme] = useState<ParticleTheme>(() => {
+        try {
+            const saved = localStorage.getItem('chain_reaction_active_theme_v3');
+            return (saved as ParticleTheme) || 'STANDARD';
+        } catch {
+            return 'STANDARD';
+        }
+    });
+
+    // Breakdown for round rewards
+    const [earnedShardStats, setEarnedShardStats] = useState<{ base: number; perfect: number; combo: number; total: number } | null>(null);
+    
+    // Persistent clear streaks
+    const [clearStreak, setClearStreak] = useState<number>(() => {
+        try {
+            const saved = localStorage.getItem('chain_reaction_clear_streak_v3');
+            return saved ? parseInt(saved, 10) : 0;
+        } catch {
+            return 0;
+        }
+    });
+
+    // Quantum Reactor Overcharge mechanics state variables
+    const [slotSpinning, setSlotSpinning] = useState(false);
+    const [slotReels, setSlotReels] = useState<string[]>(['⚡ IONIC', '💠 PLAS', '🌀 CRIT']);
+    const [slotMultiplier, setSlotMultiplier] = useState(1.0);
+    const [slotPayoutMessage, setSlotPayoutMessage] = useState("⚡ STANDBY: CHARGE REACTOR TO MULTIPLY SHARD HARVEST ⚡");
+    const [slotHasSpun, setSlotHasSpun] = useState(false);
+    const [showPayoutBanner, setShowPayoutBanner] = useState(false);
+    const [reactorCharge, setReactorCharge] = useState(0);
+    
+    const [isNearMissScreen, setIsNearMissScreen] = useState(false);
+    const [nearMissSparksPurchased, setNearMissSparksPurchased] = useState(0);
+    const [consolationShardsAwarded, setConsolationShardsAwarded] = useState<number | null>(null);
+
+    // Save clear streak consistently
+    useEffect(() => {
+        try {
+            localStorage.setItem('chain_reaction_clear_streak_v3', clearStreak.toString());
+        } catch (e) {
+            console.error(e);
+        }
+    }, [clearStreak]);
+
+    // Dynamic live reporting stats from engine
+    const [liveStats, setLiveStats] = useState<GameStats | null>(null);
+    const [didWinLast, setDidWinLast] = useState(false);
+    const [isPerfectClear, setIsPerfectClear] = useState(false);
+    
+    const canvasRef = useRef<HTMLCanvasElement>(null);
+    const engineRef = useRef<GameEngine | null>(null);
+
+    // Pointer coordinates refs to distinguish a quick tap vs dragging herding herder
+    const pointerDownRef = useRef(false);
+    const startPosRef = useRef({ x: 0, y: 0, time: 0 });
+
+    const handleScoreUpdate = (stats: GameStats) => {
+        setLiveStats(stats);
+    };
+
+    const handleRoundEnd = (win: boolean, stats: GameStats) => {
+        setDidWinLast(win);
+        setPeakCombo(prev => Math.max(prev, stats.maxCombo));
+        
+        const perfect = stats.cleared === stats.totalParticles && stats.totalParticles > 0;
+        setIsPerfectClear(perfect);
+
+        // Required count to win
+        const requiredCount = Math.max(1, Math.floor(stats.totalParticles * (stats.targetPct / 100)));
+        const diffRequired = requiredCount - stats.cleared;
+        const closeEnough = !win && diffRequired > 0 && diffRequired <= 3;
+
+        if (closeEnough) {
+            // Trigger high alert near-miss continue pop!
+            setIsNearMissScreen(true);
+            playNearMissAlert();
+            setEarnedShardStats(null);
+            setConsolationShardsAwarded(null);
+            setScreen('ROUND_OVER');
+            return;
+        }
+
+        setIsNearMissScreen(false);
+
+        if (win) {
+            if (perfect) {
+                playPerfectBonus();
+            }
+
+            // Streak advancement! Standard slot machine variable reward schedules
+            const currentStreak = clearStreak + 1;
+            setClearStreak(currentStreak);
+
+            // Shards payout layout:
+            // Base shards, incremented by streak level bonus (+15 shards per active level in consecutive streak!)
+            const streakBonus = currentStreak * 15;
+            const shardBase = 150 + level * 10 + streakBonus;
+            const shardPerfectValue = perfect ? 350 : 0;
+            const comboBonusPerHit = 5 + (upgrades.comboShardMultiplier || 0) * 4;
+            const shardComboValue = stats.maxCombo * comboBonusPerHit;
+            const shardTotalGained = shardBase + shardPerfectValue + shardComboValue;
+
+            setEarnedShardStats({
+                base: shardBase,
+                perfect: shardPerfectValue,
+                combo: shardComboValue,
+                total: shardTotalGained
+            });
+
+            // DO NOT award shards yet! They must pull the mutator slot lever to secure and multiply them.
+            setSlotHasSpun(false);
+            setSlotMultiplier(1.0);
+            setSlotPayoutMessage("🎰 CLICK 'PULL LEVER' FOR CASCADE MULTIPLIER! 🎰");
+            setShowPayoutBanner(false);
+
+            // Save standard score
+            setTotalScore(prev => {
+                let scoreGain = stats.cleared * 100 + stats.maxCombo * 50;
+                if (perfect) {
+                    scoreGain += 2500;
+                }
+                const nextScore = prev + scoreGain;
+                if (nextScore > highScore) {
+                    setHighScore(nextScore);
+                    try {
+                        localStorage.setItem('chain_reaction_high_score_v2', nextScore.toString());
+                    } catch (e) {
+                        console.error(e);
+                    }
+                }
+                return nextScore;
+            });
+
+            // Clear continue count on successful finish
+            setNearMissSparksPurchased(0);
+        } else {
+            // Level completely failed (and was not a Near Miss, or they clicked to forfeit/end)
+            setClearStreak(0);
+            setEarnedShardStats(null);
+            setNearMissSparksPurchased(0);
+
+            // LOSS DISGUISED AS A WIN (LDW):
+            // Pay consolation shards so failing always feels addictive and releases positive triggers!
+            const consolationReward = Math.max(15, Math.floor(stats.cleared * 2.5));
+            setConsolationShardsAwarded(consolationReward);
+            setShards(prev => prev + consolationReward);
+            playPerfectBonus(); // Play soft celebratory arpeggio to sound rewarding even on losses!
+        }
+        setScreen('ROUND_OVER');
+    };
+
+    // Save states consistently
+    useEffect(() => {
+        try {
+            localStorage.setItem('chain_reaction_shards_v3', shards.toString());
+        } catch (e) {
+            console.error(e);
+        }
+    }, [shards]);
+
+    useEffect(() => {
+        try {
+            localStorage.setItem('chain_reaction_upgrades_v3', JSON.stringify(upgrades));
+        } catch (e) {
+            console.error(e);
+        }
+    }, [upgrades]);
+
+    useEffect(() => {
+        try {
+            localStorage.setItem('chain_reaction_purchased_themes_v3', JSON.stringify(purchasedThemes));
+        } catch (e) {
+            console.error(e);
+        }
+    }, [purchasedThemes]);
+
+    useEffect(() => {
+        try {
+            localStorage.setItem('chain_reaction_active_theme_v3', activeTheme);
+        } catch (e) {
+            console.error(e);
+        }
+    }, [activeTheme]);
+
+    useEffect(() => {
+        if (screen === 'GAME' && canvasRef.current) {
+            engineRef.current = new GameEngine(
+                canvasRef.current, 
+                handleScoreUpdate, 
+                handleRoundEnd
+            );
+            engineRef.current.startLevel(level, upgrades, activeTheme);
+        }
+        
+        return () => {
+            if (engineRef.current) {
+                engineRef.current.destroy();
+                engineRef.current = null;
+            }
+        };
+    }, [screen, level]);
+
+    const pullSlotLever = () => {
+        if (slotSpinning || slotHasSpun || !earnedShardStats) return;
+        
+        setSlotSpinning(true);
+        setSlotHasSpun(false);
+        setSlotMultiplier(1.0);
+        setSlotPayoutMessage("⚡ INJECTING PARTICLES & MEASURING STABLE HARVEST RESIDUE... ⚡");
+        setShowPayoutBanner(false);
+        setReactorCharge(0);
+        
+        const symbols = ['🧬 DECAY', '⚡ IONIC', '💠 PLAS', '🌀 CRIT', '☀️ SOLAR'];
+        let ticksCount = 0;
+
+        // Perform fast visual roll iterations matching tactical resonance charge buildup
+        const spinInterval = setInterval(() => {
+            ticksCount++;
+            setReactorCharge(Math.min(100, Math.floor((ticksCount / 12) * 100)));
+            // Randomize three reel positions to sound authentic!
+            setSlotReels([
+                symbols[Math.floor(Math.random() * symbols.length)],
+                symbols[Math.floor(Math.random() * symbols.length)],
+                symbols[Math.floor(Math.random() * symbols.length)]
+            ]);
+            playSlotSpin();
+            if (ticksCount >= 12) {
+                clearInterval(spinInterval);
+                finishSlotLeverSpin();
+            }
+        }, 115);
+    };
+
+    const finishSlotLeverSpin = () => {
+        // High-tension weighted chance generator
+        const rand = Math.random() * 100;
+        let finalReels: string[] = [];
+        let multiplier = 1.0;
+        let msg = "";
+
+        if (rand < 7) {
+            finalReels = ['☀️ SOLAR', '☀️ SOLAR', '☀️ SOLAR'];
+            multiplier = 5.0;
+            msg = "⚡ MULTIPLIER CRITICAL JACKPOT: 5.0X HARVEST CORE SECURITISED! ⚡";
+        } else if (rand < 20) {
+            finalReels = ['🌀 CRIT', '🌀 CRIT', '🌀 CRIT'];
+            multiplier = 3.0;
+            msg = "🌀 HYPER-VELOCITY COMPRESSION CASCADE: 3.0X DIRECT PAYOUT GOAL! 🌀";
+        } else if (rand < 40) {
+            finalReels = ['💠 PLAS', '💠 PLAS', '💠 PLAS'];
+            multiplier = 2.0;
+            msg = "💠 PLASMA STABILITY OVERCHARGE INDEX: 2.0X NET FORCE RATIO! 💠";
+        } else if (rand < 65) {
+            finalReels = ['⚡ IONIC', '⚡ IONIC', '⚡ IONIC'];
+            multiplier = 1.5;
+            msg = "⚡ ION BEAM INJECTOR STABILIZED: 1.5X SHARD FLOW ACCORDED! ⚡";
+        } else if (rand < 90) {
+            const chosenMajor = ['⚡ IONIC', '💠 PLAS', '🌀 CRIT', '☀️ SOLAR'][Math.floor(Math.random() * 4)];
+            const chosenOther = ['🧬 DECAY', '⚡ IONIC', '💠 PLAS', '🌀 CRIT', '☀️ SOLAR'].filter(x => x !== chosenMajor)[Math.floor(Math.random() * 4)];
+            finalReels = [chosenMajor, chosenMajor, chosenOther];
+            multiplier = 1.25;
+            msg = "🔮 NEAR-MISS QUANTUM TUNNELING FLUX: +1.25X SHARDS REOVERCLOCKED! 🔮";
+        } else {
+            // Three unmatching symbols
+            finalReels = ['⚡ IONIC', '💠 PLAS', '🧬 DECAY'];
+            multiplier = 1.15;
+            msg = "🔋 REACTOR GRID STABLE BASELINE: +1.15X RECHARGE MULTIPLIER SECURED! 🔋";
+        }
+
+        // Apply visual stop animations left-to-right to build massive expectation tension
+        setSlotReels([finalReels[0], '🧬 DECAY', '🧬 DECAY']);
+        playSlotStop();
+
+        setTimeout(() => {
+            setSlotReels([finalReels[0], finalReels[1], '🧬 DECAY']);
+            playSlotStop();
+        }, 220);
+
+        setTimeout(() => {
+            setSlotReels(finalReels);
+            setSlotMultiplier(multiplier);
+            setSlotPayoutMessage(msg);
+            setSlotSpinning(false);
+            setSlotHasSpun(true);
+            setShowPayoutBanner(true);
+            setReactorCharge(100);
+
+            // Calculate final multiplied reward
+            const computedGained = Math.floor((earnedShardStats?.total || 100) * multiplier);
+            setShards(prev => prev + computedGained);
+            playSlotPayout(multiplier >= 3.0);
+        }, 440);
+    };
+
+    const buySecondChanceSpark = () => {
+        const fee = 50 * (nearMissSparksPurchased + 1);
+        if (shards >= fee && engineRef.current) {
+            setShards(s => s - fee);
+            setNearMissSparksPurchased(n => n + 1);
+            setIsNearMissScreen(false);
+            setScreen('GAME');
+            engineRef.current.resumeWithExtraSpark();
+        }
+    };
+
+    const forfeitNearMissRound = () => {
+        setIsNearMissScreen(false);
+        setClearStreak(0);
+        setNearMissSparksPurchased(0);
+        
+        if (liveStats) {
+            const consolationReward = Math.max(15, Math.floor(liveStats.cleared * 2.5));
+            setConsolationShardsAwarded(consolationReward);
+            setShards(prev => prev + consolationReward);
+            playPerfectBonus(); // Loss Disguised as a Win sound
+        }
+    };
+
+    const startGame = () => {
+        initAudio(); // Initialize sound synthesis securely on main player interaction
+        setIsPerfectClear(false);
+        setIsNearMissScreen(false);
+        setConsolationShardsAwarded(null);
+        if (screen === 'ROUND_OVER' && !didWinLast) {
+            setLevel(1);
+            setTotalScore(0);
+            setPeakCombo(0);
+        } else if (screen === 'ROUND_OVER' && didWinLast) {
+            setLevel(l => l + 1);
+        }
+        setScreen('GAME');
+    };
+
+    // Advanced Input Handling coordinate calculations
+    const handlePointerDown = (e: PointerEvent<HTMLCanvasElement>) => {
+        if (!engineRef.current || (liveStats && liveStats.sparksLeft <= 0)) return;
+        const rect = e.currentTarget.getBoundingClientRect();
+        
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+
+        pointerDownRef.current = true;
+        startPosRef.current = { x, y, time: Date.now() };
+
+        // Start local gravitational magnetic sweeper at click position
+        engineRef.current.setMagnet(x, y, true);
+    };
+
+    const handlePointerMove = (e: PointerEvent<HTMLCanvasElement>) => {
+        if (!pointerDownRef.current || !engineRef.current) return;
+        const rect = e.currentTarget.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+
+        // Shift active magnet sweep center
+        engineRef.current.setMagnet(x, y, true);
+    };
+
+    const handlePointerUp = (e: PointerEvent<HTMLCanvasElement>) => {
+        if (!pointerDownRef.current || !engineRef.current) return;
+        pointerDownRef.current = false;
+        
+        // Disable magnet on release
+        engineRef.current.setMagnet(0, 0, false);
+
+        const rect = e.currentTarget.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+
+        const duration = Date.now() - startPosRef.current.time;
+        const dx = x - startPosRef.current.x;
+        const dy = y - startPosRef.current.y;
+        const dist = Math.sqrt(dx*dx + dy*dy);
+
+        // A quick press with minimal hand jitter denotes deployment of trigger spark
+        if (duration < 240 && dist < 12) {
+            engineRef.current.dropTriggerSpark(x, y);
+        }
+    };
+
+    const handlePointerLeave = () => {
+        if (pointerDownRef.current && engineRef.current) {
+            pointerDownRef.current = false;
+            engineRef.current.setMagnet(0, 0, false);
+        }
+    };
+
+    // Drop detonator at current center coords in case of accessibility button click
+    const deployManualSpark = () => {
+        if (!engineRef.current || !canvasRef.current || (liveStats && liveStats.sparksLeft <= 0)) return;
+        const halfWidth = canvasRef.current.width / (2 * (window.devicePixelRatio || 1));
+        const halfHeight = canvasRef.current.height / (2 * (window.devicePixelRatio || 1));
+        engineRef.current.dropTriggerSpark(halfWidth, halfHeight);
+    };
+
+    const shareScore = () => {
+        const text = isPerfectClear 
+            ? `I hit a PERFECT ALL-CLEAR on Level ${level} of Chain Reaction with a peak combo of ${peakCombo} and Score of ${totalScore}! 🌟💥 Can you beat this dynamic chaos?`
+            : `I hit a ${peakCombo}x COMBO with a Score of ${totalScore} on Chain Reaction! Can you handle the chaos? 💥`;
+        if (navigator.clipboard) {
+            navigator.clipboard.writeText(text).then(() => {
+                alert("Score copied! Share on social media!");
+            });
+        }
+    };
+
+    const playPurchaseSound = () => {
+        playPurchaseConfirm();
+    };
+
+    // Circle progress indicators setup parameters matching design specs
+    const targetProgressSq = liveStats ? Math.min(100, Math.round((liveStats.cleared / liveStats.totalRequired) * 100)) : 0;
+    const progressRadius = 22;
+    const progressCirc = 2 * Math.PI * progressRadius; // 138.2
+    const strokeOffset = progressCirc - (targetProgressSq / 100) * progressCirc;
+
+    return (
+        <div className="flex flex-col md:flex-row items-center justify-center min-h-screen bg-[#050505] text-white selection:bg-none p-4 font-sans gap-8">
+            
+            {/* Left Column: Tactical Game Dashboard Window */}
+            <div className="w-full max-w-[380px] h-[80vh] min-h-[640px] border-[12px] border-[#1a1a1e] rounded-[48px] overflow-hidden relative shadow-2xl bg-[#0c0c0e] flex flex-col">
+                <div className="h-6 w-32 bg-[#1a1a1e] absolute top-0 left-1/2 -translate-x-1/2 rounded-b-2xl z-50 pointer-events-none"></div>
+                
+                {/* START SCREEN */}
+                {screen === 'START' && (
+                    <div className="absolute inset-0 flex flex-col items-center justify-center p-8 text-center z-10 bg-[#0c0c0e]/95 backdrop-blur-sm select-none">
+                        <div className="mb-4 inline-flex items-center justify-center bg-cyan-900/20 text-cyan-400 border border-cyan-500/30 p-3 rounded-full animate-pulse shadow-[0_0_15px_rgba(34,211,238,0.2)]">
+                            <Magnet className="w-8 h-8 text-cyan-400" />
+                        </div>
+                        <h1 className="text-5xl font-black italic mb-2 tracking-tighter bg-gradient-to-br from-cyan-400 via-fuchsia-500 to-yellow-400 text-transparent bg-clip-text drop-shadow-[0_0_15px_rgba(34,211,238,0.3)] leading-none text-center">
+                            CHAIN<br/>REACTION
+                        </h1>
+                        <p className="text-zinc-500 text-xs tracking-widest uppercase mb-10 font-bold">VORTEX EXPANSION EDITION</p>
+                        
+                        <div className="space-y-3 w-full mb-8">
+                            <button 
+                                onClick={startGame}
+                                className="w-full bg-white text-black py-4 rounded-xl font-bold text-lg flex items-center justify-center gap-2 hover:scale-105 active:scale-95 transition-all shadow-[0_0_25px_rgba(255,255,255,0.25)] cursor-pointer"
+                            >
+                                <Play className="w-5 h-5 fill-black text-black" />
+                                START ENGINE
+                            </button>
+
+                            <button 
+                                onClick={() => setScreen('SHOP')}
+                                className="w-full bg-gradient-to-r from-yellow-500 to-amber-500 text-black py-4 rounded-xl font-black text-base flex items-center justify-center gap-2 hover:scale-105 active:scale-95 transition-all shadow-[0_0_20px_rgba(245,158,11,0.25)] cursor-pointer"
+                            >
+                                <ShoppingBag className="w-5 h-5" />
+                                QUANTUM STORE [ {shards.toLocaleString()} ⚡ ]
+                            </button>
+                            
+                            <button 
+                                onClick={() => setShowHelp(!showHelp)}
+                                className="w-full bg-[#16161a] border border-zinc-800 text-zinc-300 py-3 rounded-xl text-sm font-semibold flex items-center justify-center gap-1.5 hover:bg-zinc-800 active:scale-98 transition-all cursor-pointer"
+                            >
+                                <HelpCircle className="w-4 h-4" />
+                                {showHelp ? 'HIDE SCI-OPS MANUAL' : 'VIEW SCI-OPS MANUAL'}
+                            </button>
+                        </div>
+
+                        {/* Top Score banner inside Start View */}
+                        <div className="text-center">
+                            <span className="block text-[10px] text-zinc-500 uppercase tracking-widest font-black">RECORD STANDING</span>
+                            <span className="text-xl font-black font-mono text-cyan-400">{highScore.toLocaleString()} pts</span>
+                        </div>
+                    </div>
+                )}
+
+                {/* SHOP SCREEN */}
+                {screen === 'SHOP' && (
+                    <div className="absolute inset-0 flex flex-col p-6 z-40 bg-[#0c0c0e]/98 overflow-y-auto pt-10 select-none scrollbar-none">
+                        
+                        {/* Shards tracker Header */}
+                        <div className="flex items-center justify-between mb-4 pb-3 border-b border-zinc-800">
+                            <button 
+                                onClick={() => setScreen('START')}
+                                className="flex items-center gap-1 text-zinc-400 hover:text-white transition-colors text-xs font-bold uppercase tracking-wider cursor-pointer"
+                            >
+                                <ChevronLeft className="w-4 h-4 text-cyan-400" />
+                                BACK
+                            </button>
+                            <div className="inline-flex items-center gap-1 px-3 py-1 bg-yellow-500/10 border border-yellow-500/30 rounded-full text-yellow-400 font-bold font-mono text-xs shadow-[0_0_10px_rgba(250,204,21,0.15)] animate-pulse">
+                                <Coins className="w-3.5 h-3.5 text-yellow-400" />
+                                {shards.toLocaleString()} ⚡
+                            </div>
+                        </div>
+
+                        <div className="mb-4">
+                            <h2 className="text-xl font-black italic text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 to-amber-400 uppercase tracking-tighter leading-none mb-1">
+                                QUANTUM RESEARCH
+                            </h2>
+                            <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider">
+                                UPGRADE POWER-UPS & STYLES
+                            </p>
+                        </div>
+
+                        {/* UPGRADES MODULES LIST */}
+                        <div className="space-y-3 mb-6">
+                            {SHOP_ITEMS.map((item) => {
+                                const currentLvl = upgrades[item.id] || 0;
+                                const maxLvl = item.levels.length - 1;
+                                const isMaxed = currentLvl >= maxLvl;
+                                const nextLvlConfig = isMaxed ? null : item.levels[currentLvl + 1];
+                                const currentLvlLabel = item.levels[currentLvl].valueLabel;
+
+                                // Icon pairing matcher
+                                 const IconComp = 
+                                     item.id === 'extraSparks' ? Zap : 
+                                     item.id === 'maxMagnetFuel' ? Gauge : 
+                                     item.id === 'sparkRadiusBoost' ? Sparkles : 
+                                     item.id === 'magnetPower' ? Magnet :
+                                     item.id === 'specialSpawnRate' ? Flame :
+                                     item.id === 'resonanceDuration' ? Flame :
+                                     item.id === 'decayResist' ? Shield :
+                                     item.id === 'comboShardMultiplier' ? Coins : Cpu; 
+
+                                return (
+                                    <div key={item.id} className="p-3.5 rounded-2xl bg-white/5 border border-white/5 flex flex-col gap-2">
+                                        <div className="flex items-start justify-between gap-2">
+                                            <div className="flex items-center gap-3">
+                                                <div className="p-1.5 rounded-lg bg-zinc-800 text-cyan-400 border border-zinc-700 flex-shrink-0">
+                                                    <IconComp className="w-4 h-4 text-cyan-400 fill-cyan-400" />
+                                                </div>
+                                                <div>
+                                                    <h3 className="font-bold text-xs text-white uppercase tracking-tight">{item.name}</h3>
+                                                    <p className="text-[10px] text-zinc-400 leading-tight max-w-[190px]">{item.description}</p>
+                                                </div>
+                                            </div>
+                                            
+                                            {/* Upgrade levels dots */}
+                                            <div className="flex gap-0.5 mt-1 flex-shrink-0">
+                                                {Array.from({ length: maxLvl }).map((_, idx) => (
+                                                    <div 
+                                                        key={idx} 
+                                                        className={`w-1.5 h-1.5 rounded-full ${
+                                                            idx < currentLvl ? 'bg-cyan-400 shadow-[0_0_4px_rgba(34,211,238,0.6)]' : 'bg-zinc-800 border border-zinc-700'
+                                                        }`}
+                                                    />
+                                                ))}
+                                            </div>
+                                        </div>
+
+                                        <div className="flex items-center justify-between mt-1 pt-2 border-t border-white/10 gap-2">
+                                            <span className="text-[10px] font-mono font-bold text-zinc-500">{currentLvlLabel}</span>
+                                            
+                                            {isMaxed ? (
+                                                <span className="px-2.5 py-1 text-[9px] font-black text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded-lg tracking-widest uppercase">
+                                                    MAX LEVEL
+                                                </span>
+                                            ) : (
+                                                <button
+                                                    onClick={() => {
+                                                        const cost = nextLvlConfig!.cost;
+                                                        if (shards >= cost) {
+                                                            setShards(s => s - cost);
+                                                            setUpgrades(prev => ({
+                                                                ...prev,
+                                                                [item.id]: currentLvl + 1
+                                                            }));
+                                                            playPurchaseSound();
+                                                        }
+                                                    }}
+                                                    disabled={shards < nextLvlConfig!.cost}
+                                                    className={`px-3 py-1.5 rounded-lg text-[9px] font-black tracking-wider uppercase transition-all flex items-center gap-1 ${
+                                                        shards >= nextLvlConfig!.cost
+                                                            ? 'bg-yellow-400 text-black shadow-[0_0_10px_rgba(250,204,21,0.2)] hover:scale-105 active:scale-95 cursor-pointer font-bold'
+                                                            : 'bg-zinc-800 text-zinc-500 border border-zinc-700 cursor-not-allowed'
+                                                    }`}
+                                                >
+                                                    {nextLvlConfig!.cost} ⚡
+                                                </button>
+                                            )}
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+
+                        {/* PARTICLE THEMES SHOP MODULE */}
+                        <div className="mb-2">
+                            <h2 className="text-sm font-black italic text-cyan-400 uppercase tracking-tight leading-none mb-0.5">
+                                GLOW MATRIX CORE DECODES
+                            </h2>
+                            <p className="text-[9px] text-zinc-500 font-bold uppercase tracking-wider mb-2">
+                                EXCHANGE CELLS FOR THEMED PARTICLE CODES
+                            </p>
+                        </div>
+
+                        <div className="space-y-3 mb-6">
+                            {THEME_SHOP_ITEMS.map((themeItem) => {
+                                const isUnlocked = purchasedThemes.includes(themeItem.id);
+                                const isActive = activeTheme === themeItem.id;
+
+                                return (
+                                    <div key={themeItem.id} className="p-3.5 rounded-2xl bg-white/5 border border-white/5 flex flex-col gap-2">
+                                        <div className="flex items-center justify-between gap-2">
+                                            <div>
+                                                <h3 className="font-bold text-xs text-white uppercase tracking-tight">{themeItem.name}</h3>
+                                                <p className="text-[10px] text-zinc-400 leading-tight max-w-[190px]">{themeItem.description}</p>
+                                            </div>
+                                            <div className="flex gap-1 p-1 bg-zinc-950/80 rounded-lg border border-zinc-800 flex-shrink-0">
+                                                {themeItem.colors.map((color, cIdx) => (
+                                                    <div 
+                                                        key={cIdx} 
+                                                        className="w-3.5 h-3.5 rounded-full shadow-sm"
+                                                        style={{ backgroundColor: color, boxShadow: `0 0 6px ${color}50` }}
+                                                    />
+                                                ))}
+                                            </div>
+                                        </div>
+
+                                        <div className="flex items-center justify-end pt-2 border-t border-white/10 mt-1">
+                                            {isActive ? (
+                                                <span className="px-3 py-1 bg-cyan-500/10 border border-cyan-400/25 rounded-lg text-cyan-400 text-[10px] font-black tracking-wider uppercase flex items-center gap-1 font-bold">
+                                                    <Check className="w-3.5 h-3.5 text-cyan-400" /> ACTIVE
+                                                </span>
+                                            ) : isUnlocked ? (
+                                                <button
+                                                    onClick={() => {
+                                                        setActiveTheme(themeItem.id);
+                                                        playPurchaseSound();
+                                                    }}
+                                                    className="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 border border-zinc-700 rounded-lg text-[9px] font-black tracking-wider uppercase transition-all hover:scale-103 cursor-pointer"
+                                                >
+                                                    ENGAGE
+                                                </button>
+                                            ) : (
+                                                <button
+                                                    onClick={() => {
+                                                        if (shards >= themeItem.cost) {
+                                                            setShards(s => s - themeItem.cost);
+                                                            setPurchasedThemes(prev => [...prev, themeItem.id]);
+                                                            setActiveTheme(themeItem.id);
+                                                            playPurchaseSound();
+                                                        }
+                                                    }}
+                                                    disabled={shards < themeItem.cost}
+                                                    className={`px-3 py-1.5 rounded-lg text-[9px] font-black tracking-wider uppercase transition-all ${
+                                                        shards >= themeItem.cost
+                                                            ? 'bg-yellow-400 text-black shadow-[0_0_10px_rgba(250,204,21,0.2)] hover:scale-105 active:scale-95 cursor-pointer font-bold'
+                                                            : 'bg-zinc-800 text-zinc-500 border border-zinc-700 cursor-not-allowed'
+                                                    }`}
+                                                >
+                                                    UNLOCK ({themeItem.cost} ⚡)
+                                                </button>
+                                            )}
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </div>
+                )}
+
+                {/* LIVE GAMEPLAY HUD */}
+                {screen === 'GAME' && liveStats && (
+                    <div className="absolute top-10 left-0 right-0 px-6 pointer-events-none z-40 flex justify-between items-center drop-shadow-md">
+                        <div className="flex flex-col">
+                            <span className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold">Level</span>
+                            <span className="text-2xl font-black text-white">{liveStats.level.toString().padStart(2, '0')}</span>
+                        </div>
+
+                        {/* Highly responsive radial percentage indicator */}
+                        <div className="flex flex-col items-center">
+                            <div className="w-14 h-14 rounded-full border-4 border-zinc-900/80 flex items-center justify-center relative bg-slate-950/80">
+                                <svg className="absolute inset-0 w-full h-full -rotate-90">
+                                    <circle 
+                                        cx="24" 
+                                        cy="24" 
+                                        r="22" 
+                                        fill="transparent" 
+                                        stroke="#1e293b" 
+                                        strokeWidth="4"
+                                    />
+                                    <circle 
+                                        cx="24" 
+                                        cy="24" 
+                                        r="22" 
+                                        fill="transparent" 
+                                        stroke={targetProgressSq >= 100 ? '#22c55e' : '#22d3ee'} 
+                                        strokeWidth="4"
+                                        strokeDasharray={progressCirc}
+                                        strokeDashoffset={strokeOffset}
+                                        strokeLinecap="round"
+                                        style={{ transition: 'stroke-dashoffset 0.35s ease' }}
+                                    />
+                                </svg>
+                                <span className={`text-sm font-black ${targetProgressSq >= 100 ? 'text-green-400 font-black' : 'text-cyan-400 font-black'}`}>
+                                    {targetProgressSq}%
+                                </span>
+                            </div>
+                            <span className="text-[8px] uppercase tracking-widest mt-1 text-zinc-400 font-bold">
+                                Target: {liveStats.totalRequired}
+                            </span>
+                        </div>
+
+                        <div className="flex flex-col items-end">
+                            <span className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold">Cleared</span>
+                            <span className="text-2xl font-black text-cyan-400">
+                                {liveStats.cleared}<span className="text-xs font-normal text-zinc-500">/{liveStats.totalParticles}</span>
+                            </span>
+                        </div>
+                    </div>
+                )}
+
+                {/* State Tracking Guidance overlays */}
+                {screen === 'GAME' && liveStats && (
+                    <div className="absolute top-28 left-0 right-0 text-center pointer-events-none z-10">
+                        {liveStats.combo > 1 && (
+                            <span className="inline-block text-3xl font-black text-yellow-400 italic tracking-tighter uppercase drop-shadow-[0_0_10px_rgba(250,204,21,0.7)] animate-bounce">
+                                {liveStats.combo}x Combo!
+                            </span>
+                        )}
+                    </div>
+                )}
+
+                {/* ACTIVE INTERACTIVE BOTTOM PANEL FOR HERDER MECHANICS */}
+                {screen === 'GAME' && liveStats && (
+                    <div className="absolute bottom-28 left-0 right-0 px-6 py-2 flex flex-col gap-1 pointer-events-none z-40 text-center items-center">
+                        {liveStats.sparksLeft > 0 ? (
+                            <div className="w-full flex flex-col items-center bg-slate-950/75 border border-white/5 p-3 rounded-2xl backdrop-blur-md">
+                                <div className="flex justify-between w-full items-center mb-1 bg-none">
+                                    <span className="text-[9px] uppercase tracking-widest text-yellow-400 font-bold flex items-center gap-1">
+                                        <Magnet className="w-3 h-3 text-yellow-400" /> SWEEPER CHARGE
+                                    </span>
+                                    <span className="text-xs font-mono font-bold text-yellow-400">
+                                        {Math.round((liveStats.magnetFuel / liveStats.maxMagnetFuel) * 100)}%
+                                    </span>
+                                </div>
+                                <div className="w-full h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+                                    <div 
+                                        className="h-full bg-gradient-to-r from-yellow-500 to-orange-500 transition-all duration-75"
+                                        style={{ width: `${(liveStats.magnetFuel / liveStats.maxMagnetFuel) * 100}%` }}
+                                    />
+                                </div>
+                                <span className="text-[8px] text-zinc-400 mt-1 uppercase font-bold leading-none tracking-wide text-center">
+                                    Drag to sweep & herd. Click to spark spark cascade ({liveStats.sparksLeft} left).
+                                </span>
+                            </div>
+                        ) : (
+                            <div className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-cyan-950/40 border border-cyan-800/30 backdrop-blur-md text-[10px] font-bold text-cyan-300 uppercase tracking-widest animate-pulse">
+                                <Zap className="w-3 h-3 text-cyan-400 fill-cyan-400" /> Systemic reaction cascading...
+                            </div>
+                        )}
+                    </div>
+                )}
+
+                {/* ROUND OVER STATUS SCREEN DISPLAY */}
+                {screen === 'ROUND_OVER' && liveStats && (
+                    <div className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center z-40 bg-[#0c0c0e]/95 backdrop-blur-lg select-none overflow-y-auto">
+                        
+                        {isNearMissScreen ? (
+                            /* HIGH ALERT NEAR-MISS POPUP OVERLAY */
+                            <div className="w-full flex flex-col items-center">
+                                <div className="mb-2 mt-4 inline-flex items-center justify-center p-4 bg-red-950/40 border border-red-500/50 rounded-full animate-bounce">
+                                    <AlertTriangle className="w-10 h-10 text-red-500 fill-red-500 animate-pulse" />
+                                </div>
+                                
+                                <div className="mb-1 inline-flex items-center gap-1.5 px-3 py-1 bg-red-500/10 border border-red-500/30 rounded-full text-red-500 font-extrabold text-[10px] uppercase tracking-widest animate-pulse">
+                                    ⚠️ INSTABILITY WARNING ⚠️
+                                </div>
+
+                                <h2 className="text-3xl font-black italic tracking-tighter uppercase leading-none mb-1 text-red-500 drop-shadow-[0_0_15px_rgba(239,68,68,0.4)]">
+                                    CRITICAL NEAR-MISS!
+                                </h2>
+                                
+                                <p className="text-zinc-400 text-xs font-bold leading-relaxed max-w-[270px] mb-4">
+                                    Grid reached <span className="text-white font-extrabold">{Math.round((liveStats.cleared/liveStats.totalRequired)*100)}%</span> of target progress. Stabilize reactor immediately before gravity collapse!
+                                </p>
+
+                                {/* Progress statistics */}
+                                <div className="p-3 w-full bg-red-950/10 border border-red-500/20 rounded-2xl mb-4 text-center">
+                                    <div className="flex justify-between text-xs text-zinc-300 font-bold mb-1">
+                                        <span>CELLS DETONATED:</span>
+                                        <span className="text-white">{liveStats.cleared} / {liveStats.totalRequired}</span>
+                                    </div>
+                                    <div className="w-full h-2 bg-zinc-900 rounded-full overflow-hidden">
+                                        <div 
+                                            className="h-full bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.8)]"
+                                            style={{ width: `${Math.min(100, (liveStats.cleared / liveStats.totalRequired) * 100)}%` }}
+                                        />
+                                    </div>
+                                    <span className="block text-[8px] text-zinc-500 uppercase font-black tracking-widest mt-1.5">COLLAPSE THRESHOLD DETECTED</span>
+                                </div>
+
+                                {/* Shards status and buy decision */}
+                                <div className="w-full space-y-2.5 mb-2">
+                                    <button 
+                                        onClick={buySecondChanceSpark}
+                                        disabled={shards < 50 * (nearMissSparksPurchased + 1)}
+                                        className={`w-full py-4 rounded-xl font-extrabold text-sm flex flex-col items-center justify-center gap-0.5 transition-all shadow-[0_0_20px_rgba(239,68,68,0.15)] ${
+                                            shards >= 50 * (nearMissSparksPurchased + 1)
+                                                ? 'bg-gradient-to-r from-red-500 to-orange-500 hover:scale-103 active:scale-97 text-black cursor-pointer font-black'
+                                                : 'bg-zinc-900 text-zinc-600 border border-zinc-800 cursor-not-allowed'
+                                        }`}
+                                    >
+                                        <span className="flex items-center gap-1 uppercase tracking-wider text-xs">
+                                            <Zap className="w-4 h-4 text-black fill-black" /> SECURE SECOND-CHANCE SPARK
+                                        </span>
+                                        <span className="text-[10px] font-bold opacity-80">
+                                            Cost: {50 * (nearMissSparksPurchased + 1)} ⚡ (Your Shards: {shards} ⚡)
+                                        </span>
+                                    </button>
+
+                                    <button 
+                                        onClick={forfeitNearMissRound}
+                                        className="w-full bg-zinc-800/40 hover:bg-zinc-800 text-zinc-400 py-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2 border border-zinc-700/80 active:scale-95 transition-all cursor-pointer uppercase tracking-wider"
+                                    >
+                                        💔 FORFEIT SWEEP & EXTRACT CONSOLATION CORES
+                                    </button>
+                                </div>
+                            </div>
+                        ) : (
+                            /* STANDARD OR SUCCESS DISPLAY WITH SLOT MACHINE MUTATOR REELS */
+                            <div className="w-full flex flex-col items-center">
+                                <div className="mb-2 mt-2 inline-flex items-center justify-center p-3 rounded-full border border-white/10">
+                                    {isPerfectClear ? (
+                                        <div className="bg-yellow-900/20 text-yellow-400 border-yellow-500/30 p-2 rounded-full animate-pulse shadow-[0_0_15px_rgba(250,204,21,0.3)]">
+                                            <Zap className="w-8 h-8 text-yellow-400 fill-yellow-400" />
+                                        </div>
+                                    ) : didWinLast ? (
+                                        <div className="bg-lime-900/20 text-lime-400 border-lime-500/30 p-2 rounded-full">
+                                            <Zap className="w-8 h-8 text-lime-400 fill-lime-400" />
+                                        </div>
+                                    ) : (
+                                        <div className="bg-rose-900/20 text-rose-400 border-rose-500/30 p-2 rounded-full font-bold font-bold">
+                                            <RotateCcw className="w-8 h-8 text-rose-400" />
+                                        </div>
+                                    )}
+                                </div>
+                                
+                                {isPerfectClear && (
+                                    <div className="mb-1 inline-flex items-center gap-1 px-3 py-1 rounded-full bg-yellow-500/10 border border-yellow-400/30 text-yellow-400 font-bold text-[9px] uppercase tracking-widest animate-bounce">
+                                        🌟 PERFECT CLEAR BONUS 🌟
+                                    </div>
+                                )}
+
+                                {/* High-Dopamine Levels Success Streak */}
+                                {didWinLast && clearStreak > 0 && (
+                                    <div className="mb-1.5 inline-flex items-center gap-1 px-3 py-1 rounded-full bg-orange-500/15 border border-orange-400/30 text-orange-400 font-extrabold text-[10px] uppercase tracking-widest animate-pulse shadow-[0_0_10px_rgba(249,115,22,0.15)]">
+                                        <Flame className="w-3.5 h-3.5 text-orange-400 fill-orange-400" /> STREAK: {clearStreak} SECTORS CLEARED!
+                                    </div>
+                                )}
+
+                                <h2 className={`text-4xl font-black italic tracking-tighter uppercase leading-none mb-1 ${
+                                    isPerfectClear 
+                                        ? 'text-yellow-400 drop-shadow-[0_0_20px_rgba(250,204,21,0.5)]' 
+                                        : didWinLast 
+                                            ? 'text-lime-400 drop-shadow-[0_0_15px_rgba(163,230,53,0.4)]' 
+                                            : 'text-rose-500 drop-shadow-[0_0_15px_rgba(244,63,94,0.4)]'
+                                }`}>
+                                    {isPerfectClear ? 'PERFECT ALL-CLEAR!' : didWinLast ? 'LEVEL CLEARED!' : 'TACTICAL FAULT!'}
+                                </h2>
+                                
+                                <p className="text-zinc-500 text-xs font-bold leading-tight max-w-[240px] mb-4">
+                                    {isPerfectClear
+                                        ? `Systemic sequence perfection! Every single element detonated.`
+                                        : didWinLast 
+                                            ? `Success! Heavy systemic sequence cascade completed.` 
+                                            : `Reaction died prior to clearance objective. Required: ${liveStats.totalRequired}.`}
+                                </p>
+
+                                <div className="grid grid-cols-2 gap-3 w-full mb-3">
+                                    <div className="p-3 rounded-2xl bg-white/5 border border-white/10 flex flex-col items-center relative overflow-hidden">
+                                        {isPerfectClear && <div className="absolute inset-0 bg-yellow-400/5 animate-pulse" />}
+                                        <span className="block text-[8px] font-bold text-zinc-500 uppercase tracking-widest leading-none mb-1">CLEARED SCORE</span>
+                                        <span className="text-xl font-black text-cyan-400 font-mono">+{liveStats.cleared * 100}</span>
+                                    </div>
+                                    <div className="p-3 rounded-2xl bg-white/5 border border-white/10 flex flex-col items-center flex-col items-center">
+                                        <span className="block text-[8px] font-bold text-zinc-500 uppercase tracking-widest leading-none mb-1">PEAK COMBO</span>
+                                        <span className="text-xl font-black text-yellow-400 italic font-mono">{liveStats.maxCombo}x</span>
+                                    </div>
+                                </div>
+
+                                {/* QUANTUM CORE HARVEST EXTRACTION CONSOLE */}
+                                {didWinLast && earnedShardStats && (
+                                    <div className="w-full p-4 mb-4 bg-gradient-to-b from-[#0f1115] to-[#08090c] border border-cyan-500/30 rounded-[28px] shadow-[0_0_30px_rgba(34,211,238,0.06)] relative overflow-hidden">
+                                        <div className="absolute top-1.5 left-4 w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />
+                                        <div className="absolute top-1.5 right-4 w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse delay-75" />
+                                        <div className="absolute bottom-1.5 left-4 w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse delay-150" />
+                                        <div className="absolute bottom-1.5 right-4 w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse delay-200" />
+
+                                        <div className="text-center font-black tracking-widest text-[9px] uppercase text-cyan-400 mb-2.5 flex items-center justify-center gap-1.5 select-none font-mono">
+                                            <Cpu className="w-3.5 h-3.5 text-cyan-400 animate-pulse" /> QUANTUM HARVEST EXTRACTION <Cpu className="w-3.5 h-3.5 text-cyan-400 animate-pulse" />
+                                        </div>
+
+                                        {/* Core Fluctuation Inductor Cells */}
+                                        <div className="grid grid-cols-3 gap-2.5 mb-3 select-none">
+                                            {slotReels.map((sym, idx) => {
+                                                let badgeStyle = "border-zinc-800 text-zinc-400 bg-zinc-900/50";
+                                                if (sym === '🧬 DECAY') badgeStyle = "border-rose-500/40 text-rose-400 bg-rose-950/20 shadow-[0_0_8px_rgba(244,63,94,0.15)]";
+                                                else if (sym === '⚡ IONIC') badgeStyle = "border-cyan-500/40 text-cyan-400 bg-cyan-950/20 shadow-[0_0_8px_rgba(6,182,212,0.15)]";
+                                                else if (sym === '💠 PLAS') badgeStyle = "border-violet-500/40 text-violet-400 bg-violet-950/20 shadow-[0_0_8px_rgba(139,92,246,0.15)]";
+                                                else if (sym === '🌀 CRIT') badgeStyle = "border-amber-500/40 text-amber-400 bg-amber-950/20 shadow-[0_0_8px_rgba(245,158,11,0.15)]";
+                                                else if (sym === '☀️ SOLAR') badgeStyle = "border-yellow-500/50 text-yellow-300 bg-yellow-950/30 shadow-[0_0_12px_rgba(234,179,8,0.25)] font-extrabold tracking-wider";
+
+                                                return (
+                                                    <div 
+                                                        key={idx}
+                                                        className="flex flex-col items-center p-2 rounded-2xl bg-black/95 border border-zinc-900/40 relative overflow-hidden"
+                                                    >
+                                                        <span className="block text-[7px] font-mono text-zinc-650 mb-1">CORE-{String.fromCharCode(idx + 65)}</span>
+                                                        <div 
+                                                            className={`w-full py-2.5 rounded-lg border text-center text-[10px] font-mono font-black transition-all ${badgeStyle} ${
+                                                                slotSpinning ? 'animate-pulse scale-98 border-cyan-400/50' : ''
+                                                            }`}
+                                                        >
+                                                            {sym}
+                                                        </div>
+                                                        <div className="absolute inset-x-0 bottom-0 h-[1.5px] bg-cyan-400/10 pointer-events-none"></div>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+
+                                        {/* Digital stabilization progress meter */}
+                                        <div className="mb-3.5 px-3 py-2 bg-black/80 rounded-2xl border border-zinc-900/80">
+                                            <div className="flex justify-between items-center text-[8px] font-mono text-zinc-550 mb-1 select-none">
+                                                <span>STABILIZATION RATE:</span>
+                                                <span className={`${slotSpinning ? 'text-cyan-400 animate-pulse' : 'text-zinc-450'}`}>
+                                                    {slotSpinning ? 'FUSING CORE LOG...' : 'STABLE LOCK READY'}
+                                                </span>
+                                            </div>
+                                            {/* Glowing progress line layout */}
+                                            <div className="w-full h-2 rounded-full bg-zinc-950 overflow-hidden border border-zinc-900 flex items-center p-[1px]">
+                                                <div 
+                                                    className="h-full rounded-full transition-all duration-75 bg-gradient-to-r from-cyan-500 via-emerald-400 to-yellow-400 shadow-[0_0_8px_rgba(34,211,238,0.4)]"
+                                                    style={{ width: `${reactorCharge}%` }}
+                                                />
+                                            </div>
+                                            <div className="mt-1 flex justify-between items-center font-mono text-[8px] text-zinc-650 select-none">
+                                                <span>GRID LOCK: {reactorCharge}%</span>
+                                                <span>RES: {slotSpinning ? 'AUTO' : 'STABILIZED'}</span>
+                                            </div>
+                                        </div>
+
+                                        {/* Multiplier result details and payouts info */}
+                                        <div className="text-center">
+                                            <p className={`text-[10px] font-extrabold tracking-tight select-none min-h-[16px] mb-2 uppercase ${
+                                                slotMultiplier > 1.25 ? 'text-cyan-400 animate-pulse font-black' : 'text-zinc-350'
+                                            }`}>
+                                                {slotPayoutMessage}
+                                            </p>
+                                            
+                                            <div className="flex justify-between items-center text-[10px] font-mono border-t border-zinc-900 pt-2 text-zinc-400">
+                                                <span>Sector Base:</span>
+                                                <span className="text-zinc-200">+{earnedShardStats.total} ⚡</span>
+                                            </div>
+                                            <div className="flex justify-between items-center text-[10px] font-mono text-zinc-400">
+                                                <span>Resonance Factor:</span>
+                                                <span className="text-cyan-400 font-extrabold">{slotMultiplier.toFixed(2)}x</span>
+                                            </div>
+                                            <div className="flex justify-between items-center text-xs font-black text-cyan-400 border-t border-zinc-900/40 mt-1 pt-1">
+                                                <span>MUTATED HARVEST PAYLOAD:</span>
+                                                <span className="text-sm font-black text-white bg-cyan-950/30 px-2.5 py-0.5 rounded-lg border border-cyan-500/20">{Math.floor(earnedShardStats.total * slotMultiplier)} ⚡</span>
+                                            </div>
+                                        </div>
+
+                                        {/* Core stabilization triggers */}
+                                        {!slotHasSpun && (
+                                            <button 
+                                                onClick={pullSlotLever}
+                                                disabled={slotSpinning}
+                                                className={`w-full mt-3 py-3 rounded-xl font-black text-xs uppercase flex items-center justify-center gap-1.5 transition-all outline-none ${
+                                                    slotSpinning 
+                                                        ? 'bg-zinc-800 text-zinc-500 cursor-not-allowed border border-zinc-750' 
+                                                        : 'bg-gradient-to-r from-cyan-500 to-emerald-500 hover:from-cyan-400 hover:to-emerald-400 text-black shadow-[0_0_20px_rgba(34,211,238,0.25)] hover:scale-103 active:scale-97 cursor-pointer'
+                                                }`}
+                                            >
+                                                <Cpu className={`w-4 h-4 text-black ${slotSpinning ? 'animate-spin' : ''}`} /> ENGAGE CORE RESONATOR
+                                            </button>
+                                        )}
+                                    </div>
+                                )}
+
+                                {/* Loss Disguised as a Win flashing rewards */}
+                                {!didWinLast && consolationShardsAwarded && (
+                                    <div className="w-full p-3.5 mb-4 bg-gradient-to-r from-lime-950/20 via-zinc-900/20 to-lime-950/20 border border-lime-500/20 rounded-2xl text-center shadow-[0_0_12px_rgba(132,204,22,0.1)]">
+                                        <span className="inline-block text-[9px] font-black text-lime-400 uppercase tracking-widest animate-bounce mb-1">
+                                            🎁 SECURED CONSOLATION EXTRACT 🎁
+                                        </span>
+                                        <p className="text-xs text-zinc-300 font-bold font-sans">
+                                            Liquidated standard cells recovered <span className="text-lime-400 font-black">+{consolationShardsAwarded} Shards</span> directly!
+                                        </p>
+                                    </div>
+                                )}
+
+                                <div className="flex flex-col w-full gap-2.5 mb-4">
+                                    <button 
+                                        onClick={startGame}
+                                        disabled={didWinLast && !slotHasSpun}
+                                        className={`w-full py-3.5 rounded-xl font-bold text-base flex items-center justify-center gap-2 transition-all outline-none ${
+                                            didWinLast && !slotHasSpun
+                                                ? 'bg-zinc-800 text-zinc-650 border border-zinc-750 cursor-not-allowed shadow-none'
+                                                : 'bg-white text-black hover:scale-103 active:scale-97 cursor-pointer shadow-[0_0_20px_rgba(255,255,255,0.15)]'
+                                        }`}
+                                    >
+                                        {didWinLast ? (
+                                            !slotHasSpun ? (
+                                                <>
+                                                    Locked: Resonate Core Fusers ⚡
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <Play className="w-5 h-5 fill-black text-black" /> PROCEED TO LEVEL {level + 1}
+                                                </>
+                                            )
+                                        ) : (
+                                            <>
+                                                <RotateCcw className="w-5 h-5 text-black" /> RE-ENGAGE SEQUENCE
+                                            </>
+                                        )}
+                                    </button>
+
+                                    <button 
+                                        onClick={() => {
+                                            setScreen('SHOP');
+                                        }}
+                                        className="w-full bg-gradient-to-r from-yellow-500 to-amber-500 text-black py-3 rounded-xl font-black text-sm flex items-center justify-center gap-1.5 hover:scale-103 active:scale-97 transition-all cursor-pointer shadow-[0_0_15px_rgba(245,158,11,0.15)]"
+                                    >
+                                        <ShoppingBag className="w-4 h-4 text-black" /> ENTER UPGRADE SHOP
+                                    </button>
+                                    
+                                    <button 
+                                        onClick={shareScore}
+                                        className="w-full bg-zinc-900 text-zinc-300 py-2.5 rounded-xl font-bold text-sm flex items-center justify-center gap-2 border border-zinc-800 hover:bg-zinc-800 active:scale-95 transition-all cursor-pointer"
+                                    >
+                                        <Share2 className="w-4 h-4" /> TRANSMIT DATA COMMS
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+
+                    </div>
+                )}
+                
+                {/* Active Interactive Physics Rendering Surface */}
+                <canvas 
+                    ref={canvasRef} 
+                    className="w-full h-full flex-grow block touch-none cursor-pointer"
+                    onPointerDown={handlePointerDown}
+                    onPointerMove={handlePointerMove}
+                    onPointerUp={handlePointerUp}
+                    onPointerLeave={handlePointerLeave}
+                    style={{ visibility: (screen === 'START' || screen === 'SHOP') ? 'hidden' : 'visible' }}
+                />
+
+                {/* BOTTOM PORT STATS DOCK */}
+                <div className="h-24 px-6 flex items-center justify-between gap-4 bg-[#111114] border-t border-zinc-900 relative z-40 select-none">
+                    <div className="flex-1 flex flex-col justify-center">
+                        <span className="text-[10px] uppercase font-bold text-zinc-500">SCORE</span>
+                        <span className="text-xl font-black text-white leading-none font-mono tracking-tight">{totalScore.toLocaleString()}</span>
+                    </div>
+
+                    {/* Right-aligned deploy triggers indicator lights derived from dynamic reactive specs */}
+                    {screen === 'GAME' && liveStats && (
+                        <div className="flex items-center gap-3">
+                            <div className="flex gap-1.5 mr-1" title={`${liveStats.sparksLeft} triggers remaining`}>
+                                {Array.from({ length: liveStats.sparksTotal }).map((_, idx) => (
+                                    <div 
+                                        key={idx}
+                                        className={`w-2.5 h-2.5 rounded-full transition-all duration-300 ${
+                                            idx < liveStats.sparksLeft
+                                                ? 'bg-cyan-400 shadow-[0_0_8px_rgba(34,211,238,0.8)] border border-cyan-300'
+                                                : 'bg-zinc-800 border border-zinc-700'
+                                        }`}
+                                    />
+                                ))}
+                            </div>
+                            
+                            {liveStats.sparksLeft > 0 && (
+                                <button 
+                                    onClick={deployManualSpark}
+                                    className="bg-cyan-500 hover:bg-cyan-400 text-black px-4 py-2.5 rounded-lg text-xs font-black tracking-wider uppercase flex items-center gap-1 shadow-[0_0_15px_rgba(34,211,238,0.4)] transition-all pointer-events-auto active:scale-95 cursor-pointer"
+                                    title="Manually deploy a cascade detonator spark at core center details"
+                                >
+                                    <Zap className="w-3.5 h-3.5 fill-black text-black animate-pulse" /> SPARK
+                                </button>
+                            )}
+                        </div>
+                    )}
+                </div>
+                
+                <div className="absolute bottom-2 left-1/2 -translate-x-1/2 w-32 h-1 bg-white/20 rounded-full"></div>
+            </div>
+
+            {/* Right Column: Dynamic Tactical Manual explaining elements */}
+            <div className="w-full max-w-[380px] space-y-4 select-none">
+                <div className="p-6 rounded-[36px] bg-[#0c0c0e] border border-zinc-800/80 shadow-xl flex flex-col relative overflow-hidden">
+                    <div className="absolute top-0 right-0 w-24 h-24 bg-cyan-400/5 rounded-full blur-2xl pointer-events-none"></div>
+                    <div className="absolute bottom-0 left-0 w-24 h-24 bg-fuchsia-500/5 rounded-full blur-2xl pointer-events-none"></div>
+                    
+                    <h2 className="text-lg font-black text-white italic tracking-tight mb-1 bg-gradient-to-r from-cyan-400 to-fuchsia-400 text-transparent bg-clip-text">
+                        SCI-OPS TACTICAL DIRECTIVE
+                    </h2>
+                    <p className="text-xs text-zinc-400 mb-4 leading-relaxed">
+                        Precision kinetic triggers and group alignment herding sweep. Increase level speeds force faster tactics. Spend Quantum Shards in the Shop to stabilize your reactor grid.
+                    </p>
+
+                    <div className="space-y-2 font-sans text-xs">
+                        {/* Perfect Clearance Requirement Section */}
+                        <div className="p-2.5 rounded-xl bg-gradient-to-r from-red-500/15 via-orange-500/5 to-red-500/15 border border-red-500/20 flex gap-3 items-start shadow-[0_0_10px_rgba(239,68,68,0.05)]">
+                            <span className="flex-shrink-0 text-red-400 animate-pulse text-sm">🚨</span>
+                            <div>
+                                <h4 className="font-bold text-red-400 tracking-tight uppercase text-[9px]">100% Sector Clear Required</h4>
+                                <p className="text-[11px] text-zinc-300 leading-normal font-medium">To advance to the next level, you MUST liquidate 100% of the drifting particles! Perfect clearances also yield a massive +2,500 pts and +350 bonus Shards.</p>
+                            </div>
+                        </div>
+
+                        <div className="flex gap-3 items-start p-2.5 rounded-xl bg-white/5 border border-white/5">
+                            <span className="flex-shrink-0 w-6 h-6 rounded-full bg-[#e879f9]/20 border border-[#e879f9]/50 flex items-center justify-center text-xs text-[#e879f9] font-black leading-none">
+                                🟣
+                            </span>
+                            <div>
+                                <h4 className="font-bold text-[#e879f9] tracking-tight uppercase text-[10px]">Gravity Pulse Core</h4>
+                                <p className="text-[11px] text-zinc-300 leading-normal">Pulls all shifting atoms closely toward itself during explosions. Creates robust chain reaction nodes.</p>
+                            </div>
+                        </div>
+
+                        <div className="flex gap-3 items-start p-2.5 rounded-xl bg-white/5 border border-white/5">
+                            <span className="flex-shrink-0 w-6 h-6 rounded-full bg-[#facc15]/20 border border-[#facc15]/50 flex items-center justify-center text-xs text-[#facc15] font-black leading-none font-mono">
+                                🟡
+                            </span>
+                            <div>
+                                <h4 className="font-bold text-[#facc15] tracking-tight uppercase text-[10px]">Cross Star Splitter</h4>
+                                <p className="text-[11px] text-zinc-300 leading-normal">Detonates into an 8-axis laser surge comet swarm, igniting volatile elements across long distances.</p>
+                            </div>
+                        </div>
+
+                        <div className="flex gap-3 items-start p-2.5 rounded-xl bg-white/5 border border-white/5">
+                            <span className="flex-shrink-0 w-6 h-6 rounded-full bg-cyan-400/20 border border-cyan-400/50 flex items-center justify-center text-xs text-cyan-400 font-bold leading-none">
+                                🟢
+                            </span>
+                            <div>
+                                <h4 className="font-bold text-cyan-400 tracking-tight uppercase text-[10px]">Standard Element</h4>
+                                <p className="text-[11px] text-zinc-300 leading-normal">Molecular drifting cells. Hitboxes shrink and speed increases radically based on current Level.</p>
+                            </div>
+                        </div>
+
+                        <div className="flex gap-3 items-start p-2.5 rounded-xl bg-red-950/20 border border-red-500/20">
+                            <span className="flex-shrink-0 w-6 h-6 rounded-full bg-red-400/20 border border-red-500 flex items-center justify-center text-xs text-red-400 font-bold leading-none font-mono">
+                                ✖
+                            </span>
+                            <div>
+                                <h4 className="font-bold text-red-400 tracking-tight uppercase text-[10px]">Anti-Matter Decay Cell</h4>
+                                <p className="text-[11px] text-red-300/90 leading-normal">Inert, heavy atoms spawning at Lvl 2+. They resist magnet sweeps, block split comets, and **instantly extinguish** touching explosions!</p>
+                            </div>
+                        </div>
+
+                        <div className="flex gap-3 items-start p-2.5 rounded-xl bg-rose-950/30 border border-rose-500/35">
+                            <span className="flex-shrink-0 w-6 h-6 rounded-full bg-rose-400/20 border border-rose-500 flex items-center justify-center text-xs text-rose-400 font-bold leading-none">
+                                🌀
+                            </span>
+                            <div>
+                                <h4 className="font-bold text-rose-400 tracking-tight uppercase text-[10px]">Void Singularity Hazard</h4>
+                                <p className="text-[11px] text-rose-300/90 leading-normal">Swirling crimson gravitational anomalies at Lvl 3+. They drift slowly, drag standard particles gently, but **instantly swallow** touching explosions, collapsing adjacent ones!</p>
+                            </div>
+                        </div>
+
+                        <div className="flex gap-3 items-start p-2.5 rounded-xl bg-orange-950/20 border border-orange-500/20">
+                            <span className="flex-shrink-0 w-6 h-6 rounded-full bg-orange-400/20 border border-orange-500 flex items-center justify-center text-xs text-orange-400 font-bold leading-none">
+                                🌪️
+                            </span>
+                            <div>
+                                <h4 className="font-bold text-orange-400 tracking-tight uppercase text-[10px]">Gravity Turbulence Wave</h4>
+                                <p className="text-[11px] text-orange-300/90 leading-normal">Periodic ionic re-entry waves at Lvl 3+. They sweep across the canvas, shearing and layout-disrupting herded element groups!</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                {/* Sub HUD cells info */}
+                <div className="grid grid-cols-3 gap-3">
+                    <div className="p-3 rounded-2xl bg-[#0c0c0e] border border-zinc-800/80 text-center flex flex-col justify-center">
+                        <span className="block text-[8px] font-bold text-zinc-500 uppercase tracking-widest leading-none mb-1">SHARDS SHIELD</span>
+                        <span className="text-sm font-black text-yellow-400 font-mono tracking-tighter leading-none flex items-center justify-center gap-0.5">
+                            <Coins className="w-3 h-3 text-yellow-400 inline" /> {shards.toLocaleString()}
+                        </span>
+                    </div>
+                    <div className="p-3 rounded-2xl bg-[#0c0c0e] border border-zinc-800/80 text-center flex flex-col justify-center">
+                        <span className="block text-[8px] font-bold text-zinc-500 uppercase tracking-widest leading-none mb-1">TOP COMBO</span>
+                        <span className="text-lg font-black text-yellow-500 italic font-mono tracking-tighter leading-none">{peakCombo ? `${peakCombo}X` : '---'}</span>
+                    </div>
+                    <div className="p-3 rounded-2xl bg-[#0c0c0e] border border-zinc-800/80 text-center flex flex-col justify-center">
+                        <span className="block text-[8px] font-bold text-zinc-500 uppercase tracking-widest leading-none mb-1">LEVEL PEAK</span>
+                        <span className="text-lg font-black text-cyan-400 font-mono tracking-tighter leading-none">{level.toString().padStart(2, '0')}</span>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    );
+}

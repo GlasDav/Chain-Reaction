@@ -181,6 +181,7 @@ const THEME_SHOP_ITEMS: ThemeShopItem[] = [
 
 export default function App() {
     const [screen, setScreen] = useState<Screen>('START');
+    const [shopReferrer, setShopReferrer] = useState<Screen>('START');
     const [showHelp, setShowHelp] = useState(false);
     
     // Persistent stats
@@ -668,7 +669,10 @@ export default function App() {
                             </button>
 
                             <button 
-                                onClick={() => setScreen('SHOP')}
+                                onClick={() => {
+                                    setShopReferrer('START');
+                                    setScreen('SHOP');
+                                }}
                                 className="w-full bg-gradient-to-r from-yellow-500 to-amber-500 text-black py-4 rounded-xl font-black text-base flex items-center justify-center gap-2 hover:scale-105 active:scale-95 transition-all shadow-[0_0_20px_rgba(245,158,11,0.25)] cursor-pointer"
                             >
                                 <ShoppingBag className="w-5 h-5" />
@@ -699,7 +703,7 @@ export default function App() {
                         {/* Shards tracker Header */}
                         <div className="flex items-center justify-between mb-4 pb-3 border-b border-zinc-800">
                             <button 
-                                onClick={() => setScreen('START')}
+                                onClick={() => setScreen(shopReferrer)}
                                 className="flex items-center gap-1 text-zinc-400 hover:text-white transition-colors text-xs font-bold uppercase tracking-wider cursor-pointer"
                             >
                                 <ChevronLeft className="w-4 h-4 text-cyan-400" />
@@ -1240,6 +1244,7 @@ export default function App() {
 
                                     <button 
                                         onClick={() => {
+                                            setShopReferrer('ROUND_OVER');
                                             setScreen('SHOP');
                                         }}
                                         className="w-full bg-gradient-to-r from-yellow-500 to-amber-500 text-black py-3 rounded-xl font-black text-sm flex items-center justify-center gap-1.5 hover:scale-103 active:scale-97 transition-all cursor-pointer shadow-[0_0_15px_rgba(245,158,11,0.15)]"

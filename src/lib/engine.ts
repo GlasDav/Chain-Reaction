@@ -186,7 +186,7 @@ export class GameEngine {
             level: this.level,
             targetPct: this.targetPct,
             totalRequired: Math.max(1, Math.floor(this.totalDrifting * (this.targetPct / 100))),
-            cleared: this.cleared,
+            cleared: Math.min(this.totalDrifting, this.cleared),
             combo: this.combo,
             maxCombo: this.maxCombo,
             totalParticles: this.totalDrifting,
@@ -664,7 +664,6 @@ export class GameEngine {
                             p.maxRadius = 16;
                             p.color = '#22c55e'; // vibrant green
 
-                            this.cleared++;
                             this.combo++;
                             this.maxCombo = Math.max(this.combo, this.maxCombo);
 
@@ -744,7 +743,6 @@ export class GameEngine {
                             p1.maxRadius = 16;
                             p1.color = '#22c55e'; // vibrant green
 
-                            this.cleared++;
                             this.combo++;
                             this.maxCombo = Math.max(this.combo, this.maxCombo);
 

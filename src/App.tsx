@@ -7,7 +7,8 @@ import {
     playSlotSpin, 
     playSlotStop, 
     playSlotPayout, 
-    playNearMissAlert 
+    playNearMissAlert,
+    playDefeatSound
 } from './lib/audio';
 import { 
     Cpu,
@@ -364,12 +365,12 @@ export default function App() {
             setEarnedShardStats(null);
             setNearMissSparksPurchased(0);
 
-            // LOSS DISGUISED AS A WIN (LDW):
+            // LOSS:
             // Pay consolation shards so failing always feels addictive and releases positive triggers!
             const consolationReward = Math.max(15, Math.floor(stats.cleared * 2.5));
             setConsolationShardsAwarded(consolationReward);
             setShards(prev => prev + consolationReward);
-            playPerfectBonus(); // Play soft celebratory arpeggio to sound rewarding even on losses!
+            playDefeatSound(); // Play soft dissonant/minor descending defeat arpeggio!
         }
         setScreen('ROUND_OVER');
     };
@@ -537,7 +538,7 @@ export default function App() {
             const consolationReward = Math.max(15, Math.floor(liveStats.cleared * 2.5));
             setConsolationShardsAwarded(consolationReward);
             setShards(prev => prev + consolationReward);
-            playPerfectBonus(); // Loss Disguised as a Win sound
+            playDefeatSound(); // Play defeat arpeggio
         }
     };
 
@@ -547,7 +548,7 @@ export default function App() {
         setIsNearMissScreen(false);
         setConsolationShardsAwarded(null);
         if (screen === 'ROUND_OVER' && !didWinLast) {
-            setLevel(1);
+            // Retain the current level for retrying!
             setTotalScore(0);
             setPeakCombo(0);
         } else if (screen === 'ROUND_OVER' && didWinLast) {

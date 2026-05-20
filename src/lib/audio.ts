@@ -173,3 +173,29 @@ export function playNearMissAlert() {
         });
     } catch {}
 }
+
+export function playDefeatSound() {
+    if (!audioCtx) return;
+    try {
+        const now = audioCtx.currentTime;
+        const notes = [311.13, 277.18, 246.94, 196.00, 164.81]; // Descending E minor/dissonant sequence
+        notes.forEach((freq, idx) => {
+            const osc = audioCtx!.createOscillator();
+            const gain = audioCtx!.createGain();
+            osc.connect(gain);
+            gain.connect(audioCtx!.destination);
+            
+            osc.frequency.setValueAtTime(freq, now + idx * 0.095);
+            osc.type = 'sawtooth';
+            
+            gain.gain.setValueAtTime(0, now + idx * 0.095);
+            gain.gain.linearRampToValueAtTime(0.14, now + idx * 0.095 + 0.015);
+            gain.gain.exponentialRampToValueAtTime(0.01, now + idx * 0.095 + 0.28);
+            
+            osc.start(now + idx * 0.095);
+            osc.stop(now + idx * 0.095 + 0.32);
+        });
+    } catch (e) {
+        console.error("Audio defeat error", e);
+    }
+}

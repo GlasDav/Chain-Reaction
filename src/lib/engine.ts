@@ -204,7 +204,8 @@ export class GameEngine {
         if (upgrades) this.upgrades = upgrades;
         if (activeTheme) this.activeTheme = activeTheme;
 
-        this.sparksTotal = 1 + (this.upgrades.extraSparks || 0);
+        const extraSparksLvl = this.upgrades.extraSparks || 0;
+        this.sparksTotal = Math.min(8, 1 + extraSparksLvl);
         this.sparksLeft = this.sparksTotal;
 
         // Strict 100% Target to pass
@@ -216,14 +217,13 @@ export class GameEngine {
         this.tapped = false;
         
         this.magnetActive = false;
-        this.maxMagnetFuel = 100 + (this.upgrades.maxMagnetFuel || 0) * 40; 
+        this.maxMagnetFuel = 100 + 400 * (1 - Math.pow(0.85, this.upgrades.maxMagnetFuel || 0)); 
         this.magnetFuel = this.maxMagnetFuel;
         this.orbitAngle = 0;
 
-        // Apply Resonance Duration upgrade (Level 0: 120 frames, Lvl 1: 138, Lvl 2: 156, Lvl 3: 180)
+        // Apply Resonance Duration upgrade (asymptotic soft-cap: 120 + 240 * (1 - 0.82^L))
         const durationLvl = this.upgrades.resonanceDuration || 0;
-        const durationMultiplier = 1.0 + durationLvl * 0.15;
-        this.freezeDuration = Math.round(120 * durationMultiplier);
+        this.freezeDuration = Math.round(120 + 240 * (1 - Math.pow(0.82, durationLvl)));
 
         // Reset Reactor Turbulence
         this.turbulenceActive = false;
@@ -237,16 +237,21 @@ export class GameEngine {
         this.splitterSparks = [];
 
         // DIFFICULTY UPGRADES: Scaling up velocity vectors and shrinking hitbox radius at higher levels
-        const speedScale = 1.45 + Math.min(2.4, (level - 1) * 0.22);
-        const radiusScale = Math.max(0.65, 1.0 - (level - 1) * 0.04);
+        // For levels >= 5, speed increases exponentially and radius shrinks exponentially.
+        const baseSpeedScale = 1.45 + Math.min(2.4, (level - 1) * 0.22);
+        const speedScale = baseSpeedScale * Math.pow(1.18, Math.max(0, level - 5));
+        
+        const baseRadiusScale = Math.max(0.65, 1.0 - (level - 1) * 0.04);
+        const radiusScale = Math.max(0.25, baseRadiusScale * Math.pow(0.88, Math.max(0, level - 5)));
 
         const activeThemeName = this.activeTheme || 'STANDARD';
         const currentThemeColors = THEME_COLORS[activeThemeName] || THEME_COLORS.STANDARD;
 
         // 1. Spawn clearable goal particles
         for (let i = 0; i < this.totalDrifting; i++) {
-            // Special particle spawns: base is 15%. Volatility injector upgrade increases rate up to 25% each!
-            const specialFreq = 0.15 + (this.upgrades.specialSpawnRate || 0) * 0.05;
+            // Special particle spawns: base is 15%. Reactor Volatility injector upgrade increases rate up to 65% max (Level 10)
+            const specialRateLvl = this.upgrades.specialSpawnRate || 0;
+            const specialFreq = Math.min(0.65, 0.15 + specialRateLvl * 0.05);
             const randType = Math.random();
             let pType: ParticleType = 'STANDARD';
             if (randType < specialFreq) {
@@ -275,7 +280,7 @@ export class GameEngine {
         }
 
         // 2. Spawn additional non-detonatable/heat-sink Decay particles at level 2+
-        const decayCount = level < 2 ? 0 : Math.floor(this.totalDrifting * (0.15 + Math.min(0.25, (level - 2) * 0.06)));
+        const decayCount = level < 2 ? 0 : Math.floor(this.totalDrifting * Math.min(0.60, 0.15 + (level - 2) * 0.06));
         for (let i = 0; i < decayCount; i++) {
             const decayColors = currentThemeColors.DECAY || THEME_COLORS.STANDARD.DECAY;
             const chosenColor = decayColors[Math.floor(Math.random() * decayColors.length)];
@@ -294,7 +299,7 @@ export class GameEngine {
         }
 
         // 3. Spawn Void Singularities at level 3+
-        const anomalyCount = level < 3 ? 0 : Math.min(3, Math.floor((level - 1) / 2));
+        const anomalyCount = level < 3 ? 0 : Math.min(6, Math.floor((level - 1) / 2));
         for (let i = 0; i < anomalyCount; i++) {
             this.particles.push({
                 x: Math.random() * (this.width - 80) + 40,
@@ -343,8 +348,9 @@ export class GameEngine {
             this.magnetActive = false; 
         }
 
-        // Apply spark radius boost upgrade
-        const sparkRadiusBoost = 1 + (this.upgrades.sparkRadiusBoost || 0) * 0.15;
+        // Apply spark radius boost upgrade (asymptotic soft-cap: 1.0 + 1.8 * (1 - 0.78^L))
+        const radiusBoostLvl = this.upgrades.sparkRadiusBoost || 0;
+        const sparkRadiusBoost = 1.0 + 1.8 * (1 - Math.pow(0.78, radiusBoostLvl));
         const maxRadiusWithUpgrade = 36 * sparkRadiusBoost; // reduced starting from 55 to 36
         
         // Spawn trigger spark
@@ -520,7 +526,8 @@ export class GameEngine {
                 
                 // Force falls off linearly after 180px, but strong inside it 
                 if (dist < 185) {
-                    const pullMultiplier = 1 + (this.upgrades.magnetPower || 0) * 0.40;
+                    const powerLvl = this.upgrades.magnetPower || 0;
+                    const pullMultiplier = 1.0 + 3.0 * (1 - Math.pow(0.80, powerLvl));
                     // Decay particles are heavy anti-matter, matching 30% magnet strength
                     const baseForce = p.type === 'DECAY' ? 0.06 : 0.22;
                     const power = (1 - dist / 185) * baseForce * pullMultiplier;
@@ -530,7 +537,9 @@ export class GameEngine {
             }
         } else if (!this.magnetActive && this.upgrades.magnetAutopilot && this.upgrades.magnetAutopilot > 0) {
             // Trickle recharge magnet fuel in real-time when not active
-            const rechargeRate = this.upgrades.magnetAutopilot * 0.06;
+            const autopilotLvl = this.upgrades.magnetAutopilot || 0;
+            const rechargeSpeed = Math.min(0.40, autopilotLvl * 0.04);
+            const rechargeRate = rechargeSpeed * 0.06;
             if (this.magnetFuel < this.maxMagnetFuel) {
                 this.magnetFuel = Math.min(this.maxMagnetFuel, this.magnetFuel + rechargeRate);
                 this.onScoreUpdate(this.getStats());
@@ -654,7 +663,8 @@ export class GameEngine {
                 const dy = p.y - s.y;
                 if (dx*dx + dy*dy < (p.radius + 12) * (p.radius + 12)) {
                     if (p.type === 'DECAY') {
-                        const bypassChance = (this.upgrades.decayResist || 0) * 0.25;
+                        const decayResistLvl = this.upgrades.decayResist || 0;
+                        const bypassChance = Math.min(1.0, 0.125 * decayResistLvl);
                         if (Math.random() < bypassChance) {
                             p.type = 'STANDARD';
                             p.state = 'EXPANDING';
@@ -733,7 +743,8 @@ export class GameEngine {
                 
                 if (distSq < targetDist * targetDist) {
                     if (p1.type === 'DECAY') {
-                        const bypassChance = (this.upgrades.decayResist || 0) * 0.25;
+                        const decayResistLvl = this.upgrades.decayResist || 0;
+                        const bypassChance = Math.min(1.0, 0.125 * decayResistLvl);
                         if (Math.random() < bypassChance) {
                             p1.type = 'STANDARD';
                             p1.state = 'EXPANDING';

@@ -8,7 +8,10 @@ import {
     playSlotStop, 
     playSlotPayout, 
     playNearMissAlert,
-    playDefeatSound
+    playDefeatSound,
+    playAdTick,
+    playTransactionChord,
+    playAlertBeep
 } from './lib/audio';
 import { 
     Cpu,
@@ -28,7 +31,9 @@ import {
     Dices,
     AlertTriangle,
     Trophy,
-    Shield
+    Shield,
+    Video,
+    CreditCard
 } from 'lucide-react';
 
 type Screen = 'START' | 'GAME' | 'ROUND_OVER' | 'SHOP';
@@ -37,7 +42,9 @@ interface ShopItem {
     id: keyof StoreUpgrades;
     name: string;
     description: string;
-    levels: { cost: number; valueLabel: string }[];
+    baseCost: number;
+    multiplier: number;
+    getValueLabel: (level: number) => string;
 }
 
 const SHOP_ITEMS: ShopItem[] = [
@@ -45,98 +52,101 @@ const SHOP_ITEMS: ShopItem[] = [
         id: 'extraSparks',
         name: 'Cascade Spark Battery',
         description: 'Enables dropping multiple detonators per level to restart failing reactions.',
-        levels: [
-            { cost: 0, valueLabel: '1 Spark Detonator' },
-            { cost: 800, valueLabel: '2 Spark Detonators' },
-            { cost: 2000, valueLabel: '3 Spark Detonators' }
-        ]
+        baseCost: 800,
+        multiplier: 3.5,
+        getValueLabel: (lvl) => {
+            const val = Math.min(8, 1 + lvl);
+            return `${val} Spark Detonator${val > 1 ? 's' : ''}${lvl >= 7 ? ' (Max)' : ''}`;
+        }
     },
     {
         id: 'maxMagnetFuel',
         name: 'Quantum Fuel Module',
         description: 'Increases the gravity sweeper magnet fuel capacity.',
-        levels: [
-            { cost: 0, valueLabel: '100% Sweep capacity' },
-            { cost: 400, valueLabel: '140% Sweep capacity' },
-            { cost: 900, valueLabel: '180% Sweep capacity' },
-            { cost: 1600, valueLabel: '220% Sweep capacity' }
-        ]
+        baseCost: 300,
+        multiplier: 1.7,
+        getValueLabel: (lvl) => {
+            const val = 100 + 400 * (1 - Math.pow(0.85, lvl));
+            return `${Math.round(val)}% Sweep capacity`;
+        }
     },
     {
         id: 'sparkRadiusBoost',
         name: 'Catalyst Core',
         description: 'Enlarges the trigger spark core explosion radius.',
-        levels: [
-            { cost: 0, valueLabel: 'Base range size' },
-            { cost: 500, valueLabel: '+15% reach radius' },
-            { cost: 1000, valueLabel: '+30% reach radius' },
-            { cost: 1800, valueLabel: '+45% reach radius' }
-        ]
+        baseCost: 400,
+        multiplier: 1.8,
+        getValueLabel: (lvl) => {
+            const val = 1.0 + 1.8 * (1 - Math.pow(0.78, lvl));
+            return `+${Math.round((val - 1.0) * 100)}% reach radius`;
+        }
     },
     {
         id: 'magnetPower',
         name: 'Tractor Drive Pulse',
         description: 'Increases speed & strength of herding gravitational pull.',
-        levels: [
-            { cost: 0, valueLabel: '1.0x baseline pull' },
-            { cost: 300, valueLabel: '1.4x faster herding' },
-            { cost: 700, valueLabel: '1.8x faster herding' },
-            { cost: 1200, valueLabel: '2.2x faster herding' }
-        ]
+        baseCost: 250,
+        multiplier: 1.65,
+        getValueLabel: (lvl) => {
+            const val = 1.0 + 3.0 * (1 - Math.pow(0.80, lvl));
+            return `${val.toFixed(1)}x faster herding`;
+        }
     },
     {
         id: 'specialSpawnRate',
         name: 'Reactor Volatility',
         description: 'Spawns more specialty Gravity and Splitter core bubbles in grids.',
-        levels: [
-            { cost: 0, valueLabel: '30% specialty cores' },
-            { cost: 600, valueLabel: '40% specialty cores' },
-            { cost: 1400, valueLabel: '50% specialty cores' }
-        ]
+        baseCost: 500,
+        multiplier: 2.0,
+        getValueLabel: (lvl) => {
+            const val = Math.min(0.65, 0.15 + lvl * 0.05);
+            return `${Math.round(val * 100)}% specialty cores${lvl >= 10 ? ' (Max)' : ''}`;
+        }
     },
     {
         id: 'resonanceDuration',
         name: 'Resonance Sustain Core',
         description: 'Extends active explosion lifetimes and holds reactions frozen for longer.',
-        levels: [
-            { cost: 0, valueLabel: '120f Baseline duration' },
-            { cost: 300, valueLabel: '+15% longer sustain' },
-            { cost: 600, valueLabel: '+30% longer sustain' },
-            { cost: 1000, valueLabel: '+45% longer sustain' }
-        ]
+        baseCost: 300,
+        multiplier: 1.75,
+        getValueLabel: (lvl) => {
+            const val = 120 + 240 * (1 - Math.pow(0.82, lvl));
+            return `+${Math.round(((val - 120) / 120) * 100)}% longer sustain`;
+        }
     },
     {
         id: 'decayResist',
         name: 'Decay Neutralizer Shield',
         description: 'Bypasses and converts Anti-Matter Decay Cells into helpful standard explosions.',
-        levels: [
-            { cost: 0, valueLabel: '0% Shield absorption' },
-            { cost: 450, valueLabel: '25% absorb probability' },
-            { cost: 900, valueLabel: '50% absorb probability' },
-            { cost: 1500, valueLabel: '75% absorb probability' }
-        ]
+        baseCost: 400,
+        multiplier: 1.85,
+        getValueLabel: (lvl) => {
+            const val = Math.min(1.0, 0.125 * lvl);
+            return `${Math.round(val * 100)}% absorb probability${lvl >= 8 ? ' (Max)' : ''}`;
+        }
     },
     {
         id: 'comboShardMultiplier',
         name: 'Combo Resonance Charger',
         description: 'Significantly increases net Quantum Shards generated per peak combo hit.',
-        levels: [
-            { cost: 0, valueLabel: '1.0x combo bonus speed' },
-            { cost: 350, valueLabel: '+4 bonus shards per hit' },
-            { cost: 700, valueLabel: '+8 bonus shards per hit' },
-            { cost: 1200, valueLabel: '+12 bonus shards per hit' }
-        ]
+        baseCost: 300,
+        multiplier: 1.75,
+        getValueLabel: (lvl) => {
+            const val = 4 * lvl;
+            return `+${val} bonus shards per hit`;
+        }
     },
     {
         id: 'magnetAutopilot',
         name: 'Vortex Fuel Recycler',
         description: 'Passively recharges sweeping magnet fuel slowly over time when not in use.',
-        levels: [
-            { cost: 0, valueLabel: 'Inert fuel depletion' },
-            { cost: 400, valueLabel: 'Slow passive recharge' },
-            { cost: 800, valueLabel: 'Medium passive recharge' },
-            { cost: 1300, valueLabel: 'Fast passive recharge' }
-        ]
+        baseCost: 400,
+        multiplier: 1.9,
+        getValueLabel: (lvl) => {
+            if (lvl === 0) return 'Inert fuel depletion';
+            const val = Math.min(0.40, lvl * 0.04);
+            return `Passive recharge (+${val.toFixed(2)}/f)${lvl >= 10 ? ' (Max)' : ''}`;
+        }
     }
 ];
 
@@ -259,6 +269,72 @@ export default function App() {
     const [isNearMissScreen, setIsNearMissScreen] = useState(false);
     const [nearMissSparksPurchased, setNearMissSparksPurchased] = useState(0);
     const [consolationShardsAwarded, setConsolationShardsAwarded] = useState<number | null>(null);
+
+    // Monetization System States & Decoupled APIs
+    const [monetizationOpen, setMonetizationOpen] = useState(false);
+    const [monetizationReason, setMonetizationReason] = useState<{ item: string; shortage: number } | null>(null);
+    const [adActive, setAdActive] = useState(false);
+    const [adCountdown, setAdCountdown] = useState(5);
+    const [iapActive, setIapActive] = useState(false);
+    const [iapPack, setIapPack] = useState<{ name: string; price: string; shards: number } | null>(null);
+    const [iapSuccess, setIapSuccess] = useState(false);
+    const [floatNotifs, setFloatNotifs] = useState<{ id: number; text: string }[]>([]);
+
+    const addFloatNotif = (text: string) => {
+        const id = Date.now() + Math.random();
+        setFloatNotifs(prev => [...prev, { id, text }]);
+        setTimeout(() => {
+            setFloatNotifs(prev => prev.filter(n => n.id !== id));
+        }, 3000);
+    };
+
+    // DECOUPLED AD SDK INTERCONNECT PROTOCOL
+    const triggerRewardedAd = (onRewardCallback: () => void) => {
+        initAudio();
+        playAlertBeep();
+        setAdActive(true);
+        setAdCountdown(5);
+        
+        let counter = 5;
+        const interval = setInterval(() => {
+            counter--;
+            setAdCountdown(counter);
+            if (counter > 0) {
+                playAdTick();
+            } else {
+                clearInterval(interval);
+                setAdActive(false);
+                playTransactionChord();
+                onRewardCallback();
+            }
+        }, 1000);
+    };
+
+    // DECOUPLED IN-APP PURCHASE PAYMENT GATEWAY INTERCONNECT
+    const processInAppPurchase = (pack: { name: string; price: string; shards: number }, onSuccessCallback: () => void) => {
+        initAudio();
+        playAlertBeep();
+        setIapPack(pack);
+        setIapActive(true);
+        setIapSuccess(false);
+        
+        setTimeout(() => {
+            setIapSuccess(true);
+            playTransactionChord();
+            setTimeout(() => {
+                setIapActive(false);
+                setIapPack(null);
+                setIapSuccess(false);
+                onSuccessCallback();
+            }, 1200);
+        }, 2000);
+    };
+
+    const IAP_PACKS = [
+        { id: 'mini', name: 'Mini Shard Cache', price: '$0.99', shards: 1200, label: 'Standard Boost' },
+        { id: 'cargo', name: 'Quantum Cargo Core', price: '$2.49', shards: 3500, label: 'Popular Value' },
+        { id: 'singularity', name: 'Singularity Core Pack', price: '$4.99', shards: 10000, label: 'Ultimate Surge' }
+    ];
 
     // Save clear streak consistently
     useEffect(() => {
@@ -728,10 +804,14 @@ export default function App() {
                         <div className="space-y-3 mb-6">
                             {SHOP_ITEMS.map((item) => {
                                 const currentLvl = upgrades[item.id] || 0;
-                                const maxLvl = item.levels.length - 1;
-                                const isMaxed = currentLvl >= maxLvl;
-                                const nextLvlConfig = isMaxed ? null : item.levels[currentLvl + 1];
-                                const currentLvlLabel = item.levels[currentLvl].valueLabel;
+                                const cost = Math.round(item.baseCost * Math.pow(item.multiplier, currentLvl));
+                                const currentLvlLabel = item.getValueLabel(currentLvl);
+
+                                const isMaxed = 
+                                    (item.id === 'extraSparks' && currentLvl >= 7) ||
+                                    (item.id === 'specialSpawnRate' && currentLvl >= 10) ||
+                                    (item.id === 'decayResist' && currentLvl >= 8) ||
+                                    (item.id === 'magnetAutopilot' && currentLvl >= 10);
 
                                 // Icon pairing matcher
                                  const IconComp = 
@@ -752,21 +832,14 @@ export default function App() {
                                                     <IconComp className="w-4 h-4 text-cyan-400 fill-cyan-400" />
                                                 </div>
                                                 <div>
-                                                    <h3 className="font-bold text-xs text-white uppercase tracking-tight">{item.name}</h3>
+                                                    <h3 className="font-bold text-xs text-white uppercase tracking-tight flex items-center gap-1.5">
+                                                        {item.name}
+                                                        <span className="text-[9px] px-1.5 py-0.5 rounded bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 font-mono font-bold leading-none">
+                                                            Tier {currentLvl}
+                                                        </span>
+                                                    </h3>
                                                     <p className="text-[10px] text-zinc-400 leading-tight max-w-[190px]">{item.description}</p>
                                                 </div>
-                                            </div>
-                                            
-                                            {/* Upgrade levels dots */}
-                                            <div className="flex gap-0.5 mt-1 flex-shrink-0">
-                                                {Array.from({ length: maxLvl }).map((_, idx) => (
-                                                    <div 
-                                                        key={idx} 
-                                                        className={`w-1.5 h-1.5 rounded-full ${
-                                                            idx < currentLvl ? 'bg-cyan-400 shadow-[0_0_4px_rgba(34,211,238,0.6)]' : 'bg-zinc-800 border border-zinc-700'
-                                                        }`}
-                                                    />
-                                                ))}
                                             </div>
                                         </div>
 
@@ -780,7 +853,6 @@ export default function App() {
                                             ) : (
                                                 <button
                                                     onClick={() => {
-                                                        const cost = nextLvlConfig!.cost;
                                                         if (shards >= cost) {
                                                             setShards(s => s - cost);
                                                             setUpgrades(prev => ({
@@ -788,16 +860,22 @@ export default function App() {
                                                                 [item.id]: currentLvl + 1
                                                             }));
                                                             playPurchaseSound();
+                                                            addFloatNotif(`Purchased ${item.name} Tier ${currentLvl + 1}!`);
+                                                        } else {
+                                                            setMonetizationReason({
+                                                                item: `${item.name} Tier ${currentLvl + 1}`,
+                                                                shortage: cost - shards
+                                                            });
+                                                            setMonetizationOpen(true);
                                                         }
                                                     }}
-                                                    disabled={shards < nextLvlConfig!.cost}
-                                                    className={`px-3 py-1.5 rounded-lg text-[9px] font-black tracking-wider uppercase transition-all flex items-center gap-1 ${
-                                                        shards >= nextLvlConfig!.cost
-                                                            ? 'bg-yellow-400 text-black shadow-[0_0_10px_rgba(250,204,21,0.2)] hover:scale-105 active:scale-95 cursor-pointer font-bold'
-                                                            : 'bg-zinc-800 text-zinc-500 border border-zinc-700 cursor-not-allowed'
+                                                    className={`px-3 py-1.5 rounded-lg text-[9px] font-black tracking-wider uppercase transition-all flex items-center gap-1 cursor-pointer ${
+                                                        shards >= cost
+                                                            ? 'bg-yellow-400 text-black shadow-[0_0_10px_rgba(250,204,21,0.2)] hover:scale-105 active:scale-95 font-bold'
+                                                            : 'bg-zinc-800 border border-zinc-700 text-zinc-400 hover:bg-zinc-755 hover:text-yellow-400 hover:scale-105 active:scale-95 shadow-[0_0_10px_rgba(250,204,21,0.05)]'
                                                     }`}
                                                 >
-                                                    {nextLvlConfig!.cost} ⚡
+                                                    {cost} ⚡
                                                 </button>
                                             )}
                                         </div>
@@ -1252,6 +1330,18 @@ export default function App() {
                                         <ShoppingBag className="w-4 h-4 text-black" /> ENTER UPGRADE SHOP
                                     </button>
                                     
+                                    {!didWinLast && (
+                                        <button 
+                                            onClick={() => {
+                                                setMonetizationReason(null);
+                                                setMonetizationOpen(true);
+                                            }}
+                                            className="w-full bg-gradient-to-r from-cyan-500 to-emerald-500 text-black py-3 rounded-xl font-black text-sm flex items-center justify-center gap-1.5 hover:scale-103 active:scale-97 transition-all cursor-pointer shadow-[0_0_15px_rgba(6,182,212,0.15)] animate-pulse"
+                                        >
+                                            <Coins className="w-4 h-4 text-black fill-black animate-bounce" /> QUANTUM SHARDS BOOSTER (+250 ⚡ Free)
+                                        </button>
+                                    )}
+
                                     <button 
                                         onClick={shareScore}
                                         className="w-full bg-zinc-900 text-zinc-300 py-2.5 rounded-xl font-bold text-sm flex items-center justify-center gap-2 border border-zinc-800 hover:bg-zinc-800 active:scale-95 transition-all cursor-pointer"
@@ -1313,6 +1403,184 @@ export default function App() {
                 </div>
                 
                 <div className="absolute bottom-2 left-1/2 -translate-x-1/2 w-32 h-1 bg-white/20 rounded-full"></div>
+
+                {/* Floating Notifications Overlay */}
+                <div className="absolute top-16 left-4 right-4 z-50 pointer-events-none flex flex-col gap-2">
+                    {floatNotifs.map(n => (
+                        <div 
+                            key={n.id}
+                            className="bg-emerald-500 text-black px-3 py-2 rounded-xl text-xs font-black shadow-[0_0_15px_rgba(16,185,129,0.4)] flex items-center justify-center gap-1.5 animate-bounce"
+                        >
+                            <span>⚡</span> {n.text}
+                        </div>
+                    ))}
+                </div>
+
+                {/* Quantum Syndicate Portal (Monetization Modal) */}
+                {monetizationOpen && (
+                    <div className="absolute inset-0 z-50 bg-black/95 backdrop-blur-md flex flex-col justify-between p-6 select-none animate-fadeIn font-sans text-white">
+                        
+                        {/* SCREEN 1: Fullscreen Rewarded Video Ad Simulator */}
+                        {adActive ? (
+                            <div className="flex-grow flex flex-col items-center justify-center text-center p-4">
+                                <div className="w-20 h-20 rounded-full border-4 border-dashed border-cyan-400 animate-spin flex items-center justify-center mb-6 shadow-[0_0_20px_rgba(34,211,238,0.4)]">
+                                    <Video className="w-8 h-8 text-cyan-400" />
+                                </div>
+                                <h3 className="text-lg font-black text-white italic uppercase tracking-wider mb-2 bg-gradient-to-r from-cyan-400 to-fuchsia-400 text-transparent bg-clip-text">
+                                    STREAMING HARVEST BEACON
+                                </h3>
+                                <p className="text-[9px] text-zinc-500 uppercase tracking-widest font-bold mb-8">
+                                    SECURE QUANTUM CHANNEL CONNECTED
+                                </p>
+                                <div className="text-6xl font-black text-yellow-400 font-mono tracking-tighter mb-4 animate-pulse">
+                                    {adCountdown}s
+                                </div>
+                                <p className="text-[9px] text-zinc-400 font-medium max-w-[200px] leading-relaxed uppercase tracking-wider font-sans">
+                                    Do not disconnect transmitter grid. Shards will arrive shortly...
+                                </p>
+                            </div>
+                        ) : iapActive ? (
+                            /* SCREEN 2: Stripe-like simulated IAP Checkout card overlay */
+                            <div className="flex-grow flex flex-col items-center justify-center text-center p-4">
+                                <div className="w-full max-w-[280px] bg-zinc-900/90 border border-zinc-800 rounded-3xl p-6 shadow-2xl relative overflow-hidden">
+                                    <div className="absolute -top-12 -left-12 w-24 h-24 bg-fuchsia-500/10 rounded-full blur-2xl"></div>
+                                    <div className="absolute -bottom-12 -right-12 w-24 h-24 bg-yellow-400/10 rounded-full blur-2xl"></div>
+                                    
+                                    <div className="flex justify-between items-center mb-6 border-b border-zinc-800 pb-3">
+                                        <div className="flex items-center gap-1.5 text-zinc-400">
+                                            <CreditCard className="w-4 h-4" />
+                                            <span className="text-[10px] font-black uppercase tracking-wider">SECURE CHECKOUT</span>
+                                        </div>
+                                        <span className="text-[10px] font-mono text-zinc-500">v3.42</span>
+                                    </div>
+                                    
+                                    {iapSuccess ? (
+                                        <div className="py-6 flex flex-col items-center justify-center animate-scaleUp">
+                                            <div className="w-16 h-16 rounded-full bg-emerald-500/15 border-2 border-emerald-400 flex items-center justify-center mb-4 shadow-[0_0_15px_rgba(16,185,129,0.3)]">
+                                                <span className="text-2xl text-emerald-400 font-bold">✓</span>
+                                            </div>
+                                            <h4 className="text-sm font-black text-white uppercase tracking-wider mb-1">TRANSACTION COMPLETE</h4>
+                                            <p className="text-[10px] text-emerald-400 font-bold font-mono">+{iapPack?.shards} SHARDS AUTHORIZED</p>
+                                        </div>
+                                    ) : (
+                                        <div className="py-6 flex flex-col items-center justify-center">
+                                            <div className="w-12 h-12 rounded-full border-2 border-t-yellow-400 border-r-zinc-700 border-b-zinc-700 border-l-zinc-700 animate-spin flex items-center justify-center mb-4"></div>
+                                            <h4 className="text-sm font-black text-zinc-300 uppercase tracking-wider mb-1">PROCESSING</h4>
+                                            <p className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold font-mono">DECRYPTING PACK CODES</p>
+                                            <div className="mt-4 p-2.5 bg-zinc-950 rounded-xl w-full text-left border border-zinc-800">
+                                                <div className="flex justify-between text-[9px] text-zinc-400 uppercase font-black leading-none">
+                                                    <span>{iapPack?.name}</span>
+                                                    <span className="text-white font-mono">{iapPack?.price}</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        ) : (
+                            /* SCREEN 3: Main Quantum Syndicate Selection */
+                            <div className="flex-grow flex flex-col justify-between h-full">
+                                <div>
+                                    {/* Header & Logo */}
+                                    <div className="flex items-center justify-between border-b border-zinc-800 pb-3 mb-5">
+                                        <div className="flex items-center gap-1.5">
+                                            <Coins className="w-5 h-5 text-yellow-400 fill-yellow-400/20" />
+                                            <span className="text-xs font-black uppercase text-zinc-400 tracking-wider">QUANTUM SYNDICATE</span>
+                                        </div>
+                                        <div className="bg-yellow-400/10 border border-yellow-400/20 text-yellow-400 px-2 py-0.5 rounded-lg text-[9px] font-bold font-mono">
+                                            {shards.toLocaleString()} ⚡
+                                        </div>
+                                    </div>
+
+                                    {/* Warning alert & context of deficit */}
+                                    {monetizationReason ? (
+                                        <div className="p-3.5 rounded-2xl bg-gradient-to-r from-red-500/15 via-zinc-900 to-red-500/10 border border-red-500/25 shadow-[0_0_15px_rgba(239,68,68,0.05)] mb-6 text-center">
+                                            <div className="text-red-400 font-bold uppercase text-[10px] tracking-wider mb-1 animate-pulse flex items-center justify-center gap-1">
+                                                <span>⚠️</span> CRITICAL DEPLETION
+                                            </div>
+                                            <p className="text-[11px] text-zinc-300 leading-normal font-sans">
+                                                You require <span className="text-yellow-400 font-bold font-mono">+{monetizationReason.shortage.toLocaleString()} ⚡</span> Shards to unlock <span className="text-white font-bold">{monetizationReason.item}</span>.
+                                            </p>
+                                        </div>
+                                    ) : (
+                                        <div className="p-3.5 rounded-2xl bg-gradient-to-r from-cyan-500/15 via-zinc-900 to-emerald-500/10 border border-cyan-500/25 shadow-[0_0_15px_rgba(34,211,238,0.05)] mb-6 text-center">
+                                            <div className="text-cyan-400 font-bold uppercase text-[10px] tracking-wider mb-1 animate-pulse flex items-center justify-center gap-1">
+                                                <span>⚡</span> HARVEST BEACON AMPLIFIER
+                                            </div>
+                                            <p className="text-[11px] text-zinc-300 leading-normal font-sans">
+                                                Engage backup comms or purchase quantum packs to instantly supercharge your grid reserves.
+                                            </p>
+                                        </div>
+                                    )}
+
+                                    {/* Option 1: Watch Rewarded Ad Option */}
+                                    <div className="mb-6">
+                                        <button
+                                            onClick={() => {
+                                                triggerRewardedAd(() => {
+                                                    setShards(s => s + 250);
+                                                    addFloatNotif("+250 Shards Received!");
+                                                    setMonetizationOpen(false);
+                                                });
+                                            }}
+                                            className="w-full bg-gradient-to-r from-cyan-500 to-emerald-500 text-black py-4 rounded-xl font-black text-xs flex items-center justify-center gap-2 hover:scale-102 active:scale-98 transition-all cursor-pointer shadow-[0_0_20px_rgba(6,182,212,0.25)] border-none"
+                                        >
+                                            <Video className="w-4 h-4 fill-black text-black" /> WATCH AD COMMS (+250 ⚡ FREE)
+                                        </button>
+                                        <p className="text-[9px] text-zinc-500 text-center font-bold uppercase tracking-wider mt-1.5">
+                                            WATCH A SECURE 5S VIDEO TRANSMISSION FOR SHARDS
+                                        </p>
+                                    </div>
+
+                                    {/* Option 2: Shard credit packages list */}
+                                    <div className="space-y-2.5">
+                                        <div className="text-[9px] text-zinc-500 font-black uppercase tracking-widest mb-1.5 border-b border-zinc-900 pb-1">
+                                            QUANTUM SHARD CORES
+                                        </div>
+                                        {IAP_PACKS.map(pack => (
+                                            <button
+                                                key={pack.id}
+                                                onClick={() => {
+                                                    processInAppPurchase(pack, () => {
+                                                        setShards(s => s + pack.shards);
+                                                        addFloatNotif(`+${pack.shards.toLocaleString()} Shards Added!`);
+                                                        setMonetizationOpen(false);
+                                                    });
+                                                }}
+                                                className="w-full bg-zinc-900/60 hover:bg-zinc-800/80 border border-zinc-800 rounded-2xl p-3 flex justify-between items-center transition-all hover:scale-102 active:scale-98 text-left cursor-pointer group"
+                                            >
+                                                <div className="flex flex-col">
+                                                    <span className="text-[11px] font-black text-white group-hover:text-yellow-400 transition-colors uppercase leading-none mb-1">
+                                                        {pack.name}
+                                                    </span>
+                                                    <span className="text-[9px] text-zinc-500 font-bold uppercase">
+                                                        {pack.label}
+                                                    </span>
+                                                </div>
+                                                <div className="flex items-center gap-2.5">
+                                                    <span className="text-[10px] font-black text-yellow-400 font-mono bg-yellow-400/10 border border-yellow-400/20 px-2 py-0.5 rounded-lg">
+                                                        +{pack.shards.toLocaleString()} ⚡
+                                                    </span>
+                                                    <span className="text-[10px] font-bold text-zinc-400 bg-zinc-800 border border-zinc-700 px-2 py-0.5 rounded-lg font-mono">
+                                                        {pack.price}
+                                                    </span>
+                                                </div>
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+
+                                {/* Footer & Cancel button */}
+                                <button
+                                    onClick={() => setMonetizationOpen(false)}
+                                    className="w-full bg-zinc-950 border border-zinc-800 text-zinc-400 py-3 rounded-xl text-xs font-black tracking-widest uppercase hover:bg-zinc-900 hover:text-white active:scale-98 transition-all cursor-pointer mt-6"
+                                >
+                                    RETURN TO REACTOR GRID
+                                </button>
+                            </div>
+                        )}
+                    </div>
+                )}
             </div>
 
             {/* Right Column: Dynamic Tactical Manual explaining elements */}

@@ -199,3 +199,59 @@ export function playDefeatSound() {
         console.error("Audio defeat error", e);
     }
 }
+
+export function playAdTick() {
+    if (!audioCtx) return;
+    try {
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.frequency.setValueAtTime(600, audioCtx.currentTime);
+        osc.type = 'sine';
+        gain.gain.setValueAtTime(0, audioCtx.currentTime);
+        gain.gain.linearRampToValueAtTime(0.08, audioCtx.currentTime + 0.005);
+        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.08);
+        osc.start();
+        osc.stop(audioCtx.currentTime + 0.09);
+    } catch {}
+}
+
+export function playTransactionChord() {
+    if (!audioCtx) return;
+    try {
+        const now = audioCtx.currentTime;
+        const notes = [392.00, 523.25, 659.25, 783.99, 1046.50]; // Beautiful C Major 9th chime
+        notes.forEach((freq, idx) => {
+            const osc = audioCtx!.createOscillator();
+            const gain = audioCtx!.createGain();
+            osc.connect(gain);
+            gain.connect(audioCtx!.destination);
+            osc.frequency.setValueAtTime(freq, now + idx * 0.05);
+            osc.type = 'sine';
+            gain.gain.setValueAtTime(0, now + idx * 0.05);
+            gain.gain.linearRampToValueAtTime(0.12, now + idx * 0.05 + 0.01);
+            gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.05 + 0.35);
+            osc.start(now + idx * 0.05);
+            osc.stop(now + idx * 0.05 + 0.4);
+        });
+    } catch {}
+}
+
+export function playAlertBeep() {
+    if (!audioCtx) return;
+    try {
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.frequency.setValueAtTime(440, audioCtx.currentTime);
+        osc.type = 'triangle';
+        gain.gain.setValueAtTime(0, audioCtx.currentTime);
+        gain.gain.linearRampToValueAtTime(0.07, audioCtx.currentTime + 0.005);
+        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.15);
+        osc.start();
+        osc.stop(audioCtx.currentTime + 0.16);
+    } catch {}
+}
+

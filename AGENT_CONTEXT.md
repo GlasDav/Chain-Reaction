@@ -1,143 +1,109 @@
-# Chain Reaction — Agent Handover & Session Context
+# Chain Reaction — Live Developer Context & System Handbook
 
-This context document is designed to get the next coding agent instantly up to speed on the React/Vite-based canvas game **Chain Reaction** and provide exact, actionable solutions for the two target bugs.
+Welcome to the **Chain Reaction** workspace context document. This handbook is designed to get any incoming coding agent or developer instantly up to speed on the project architecture, mathematical systems, dynamic difficulty scaling, and high-fidelity simulated monetization system.
 
 ---
 
 ## 🎮 Project Architecture Overview
 
-Chain Reaction is a single-screen hyper-casual web game built using the following stack:
-1. **Frontend Core:** React, TypeScript, and Vite.
+Chain Reaction is a single-screen hyper-casual freemium web game built using the following stack:
+1. **Frontend Core:** React 19, TypeScript, and Vite.
 2. **Graphics & Rendering:** HTML5 Canvas API driven by a custom physics engine class (`GameEngine` in `src/lib/engine.ts`).
-3. **Sound System:** Procedural Web Audio API synthesizer (`src/lib/audio.ts`) providing dynamic chord sweeps, perfect bonus arpeggios, near-miss warnings, and minor arpeggios.
-4. **Styling:** Vanilla Tailwind CSS with vibrant neon-glow theme colors (STANDARD, NEBULA, MATRIX, SUPERNOVA).
+3. **Sound System:** Procedural Web Audio API synthesizer (`src/lib/audio.ts`) providing custom oscillators, chord sweeps, and warning beeps.
+4. **Styling:** Tailwind CSS v4.0 with vibrant neon-glow theme colors (STANDARD, NEBULA, MATRIX, SUPERNOVA).
 
-### Key Files
-* [App.tsx](file:///C:/Users/David%20Glasser/antigravity/Chain-Reaction/src/App.tsx) — Main dashboard UI, dashboard screens (`'START'`, `'GAME'`, `'ROUND_OVER'`, `'SHOP'`), persistent states (localStorage for shards, high score, and upgrade tier progress), and slot-machine reactor rewards.
-* [engine.ts](file:///C:/Users/David%20Glasser/antigravity/Chain-Reaction/src/lib/engine.ts) — Physics engine running inside canvas animation loops. Handles drifting elements, splitter sparks, sweeper magnet gravity formulas, void anomaly collisions, and chain-reaction calculations.
-* [audio.ts](file:///C:/Users/David%20Glasser/antigravity/Chain-Reaction/src/lib/audio.ts) — Dynamic Web Audio synthesizer.
-
----
-
-## ⚡ Summary of Recent Work Done
-
-The game recently underwent a massive features, performance, and balancing overhaul:
-1. **Difficulty/Progression Balancing:** Gifted starting shards were reduced to `30`, starting explosion radii shrunk by ~40%, and standard drifting particle hitboxes scaled down. Levels now require **100% all-clear** (liquidating all standard drift particles) to advance.
-2. **Rendering Performance Optimization:** High CPU-overhead `shadowBlur` and `shadowColor` properties were replaced with procedurally painted semi-transparent glow rings. Debris particles now paint via fast `fillRect` rather than slow circles (`arc`). Grid spacing was optimized to keep rendering at a locked **60 FPS** even during massive chain reactions.
-3. **Hazards & Shop Additions:**
-   * **Void Singularities (`VOID_ANOMALY`):** Red/black swirling hazards spawning at level 3+ that pull atoms and instantly swallow active explosions.
-   * **Resonance Sustain Core (`resonanceDuration`):** Extends active explosion lifetimes up to 3.0 seconds.
-   * **Decay Neutralizer Shield (`decayResist`):** Grants a chance to bypass and absorb heavy Anti-Matter Decay Cells (turning them into green standard explosions with a popup).
-   * **Combo Resonance Charger (`comboShardMultiplier`):** Boosts Shard yields on peak combo hits.
-   * **Vortex Fuel Recycler (`magnetAutopilot`):** Trickle-recharges gravity herder magnet fuel slowly when inactive.
-4. **Custom Defeat Audio:** Added `playDefeatSound()` which sounds a descending minor arpeggio when a round fails.
+### Key Files in Workspace
+* [src/App.tsx](file:///c:/Users/David%20Glasser/OneDrive/Documents/Projects/Chain%20Reaction/src/App.tsx) — Main dashboard UI, screen states (`'START'`, `'GAME'`, `'ROUND_OVER'`, `'SHOP'`), persistent upgrades storage, and the **Quantum Syndicate Portal** premium monetization flow.
+* [src/lib/engine.ts](file:///c:/Users/David%20Glasser/OneDrive/Documents/Projects/Chain%20Reaction/src/lib/engine.ts) — Physics engine running within canvas loops. Handles drifting particles, gravity sweep vectors, void singularities, decay conversions, and chain-reaction calculations.
+* [src/lib/audio.ts](file:///c:/Users/David%20Glasser/OneDrive/Documents/Projects/Chain%20Reaction/src/lib/audio.ts) — Procedural Web Audio API sound synthesis.
+* [src/index.css](file:///c:/Users/David%20Glasser/OneDrive/Documents/Projects/Chain%20Reaction/src/index.css) — Global CSS custom keyframe definitions (`fadeIn`, `scaleUp`) and animations.
 
 ---
 
-## 🎯 Target Bugs & Actionable Solutions
+## 💎 Infinite Progression & Asymptotic Upgrade Formulas
 
-The user has reported two critical bugs from playtesting. Follow the plans below to resolve them:
+To support infinite upgrades without breaking the physical boundaries of the canvas rendering, stats are categorized into two classes:
 
-### Bug 1: Upgrade Shop Level Regression
-**Symptom:** Going into the Upgrade Shop and buying something returns the player to their previous level (effectively sending them "back" a level) rather than letting them proceed to the next unlocked level.
+### Category A: Continuous Stats (Asymptotic Soft-Caps)
+These stats increase infinitely (levels $L$ can reach $100+$) but approach a mathematical ceiling, ensuring that active explosions or magnet fields never exceed physical screen dimensions:
+$$\text{Value}(L) = \text{BaseValue} + \text{MaxIncrease} \times (1 - \lambda^L)$$
 
-#### 🔍 Root Cause Analysis
-1. When a player clears a level, they are shown the `'ROUND_OVER'` screen with the slot machine.
-2. If they click **PROCEED TO LEVEL X**, the `startGame()` function is invoked:
-   ```typescript
-   if (screen === 'ROUND_OVER' && didWinLast) {
-       setLevel(l => l + 1); // Advances level!
-   }
-   ```
-3. However, if they instead click **ENTER UPGRADE SHOP** from `'ROUND_OVER'`, the screen transitions to `'SHOP'` (`setScreen('SHOP')`).
-4. In [App.tsx line 702](file:///C:/Users/David%20Glasser/antigravity/Chain-Reaction/src/App.tsx#L702), the Shop's BACK button is hardcoded to navigate to `'START'`:
-   ```typescript
-   onClick={() => setScreen('START')}
-   ```
-5. When the user is returned to the Start screen, clicking **START ENGINE** calls `startGame()` from a state of `screen === 'START'`. Because `screen` is not `'ROUND_OVER'`, the level increment logic `setLevel(l => l + 1)` is bypassed. The user is forced to replay the level they just cleared, sending them "back a level".
+* **Catalyst Core (`sparkRadiusBoost`):** Spark reach explosion radius.
+  * *Formula:* $\text{RadiusMultiplier}(L) = 1.0 + 1.8 \times (1 - 0.78^L)$ *(Asymptotes at $2.8\text{x}$ reaches)*
+* **Quantum Fuel Module (`maxMagnetFuel`):** Sweeping magnet fuel capacity.
+  * *Formula:* $\text{FuelCap}(L) = 100 + 400 \times (1 - 0.85^L)$ *(Asymptotes at $500$ sweep capacity)*
+* **Tractor Drive Pulse (`magnetPower`):** Gravitational sweep pull strength.
+  * *Formula:* $\text{PullStrength}(L) = 1.0 + 3.0 \times (1 - 0.80^L)$ *(Asymptotes at $4.0\text{x}$ pull power)*
+* **Resonance Sustain Core (`resonanceDuration`):** Active explosion hold frames duration.
+  * *Formula:* $\text{HoldFrames}(L) = 120 + 240 \times (1 - 0.82^L)$ *(Asymptotes at $360$ frames / 6s)*
 
-#### 🛠️ Recommended Fix
-Introduce a referrer memory state to allow the shop to return to the screen the player came from:
-1. In `src/App.tsx`, declare a new state variable:
-   ```typescript
-   const [shopReferrer, setShopReferrer] = useState<Screen>('START');
-   ```
-2. When navigating to `'SHOP'` from `'START'`, capture the origin:
-   ```typescript
-   onClick={() => {
-       setShopReferrer('START');
-       setScreen('SHOP');
-   }}
-   ```
-3. When navigating to `'SHOP'` from `'ROUND_OVER'`, capture the origin:
-   ```typescript
-   onClick={() => {
-       setShopReferrer('ROUND_OVER');
-       setScreen('SHOP');
-   }}
-   ```
-4. Update the Shop's BACK button to return to the referrer:
-   ```typescript
-   onClick={() => setScreen(shopReferrer)}
-   ```
-   *This returns the player to `'ROUND_OVER'`, allowing them to see their score/slot machine results and correctly proceed to the next level.*
+### Category B: Discrete/Percentage Stats (Linear Clamps)
+These stats increase linearly up to logical limits (e.g. 100% absorption or 8 sparks), after which their *costs* continue to scale exponentially as a prestige achievement sink, but their value remains capped at the max threshold:
+
+* **Cascade Spark Battery (`extraSparks`):** Spark Retries. Capped at **Level 7 (8 Sparks)**.
+* **Decay Neutralizer Shield (`decayResist`):** Converts decay cells to explosions. Capped at **Level 8 (100%)**.
+* **Reactor Volatility (`specialSpawnRate`):** Spawn frequency of special atoms. Capped at **Level 10 (65%)**.
+* **Vortex Fuel Recycler (`magnetAutopilot`):** Inactive magnet sweep fuel trickle recharge. Capped at **Level 10 (0.40/f)**.
+* **Combo Resonance Charger (`comboShardMultiplier`):** Bonus shards per peak combo. Uncapped ($\text{Bonus} = 4 \times L$).
+
+### Cost Progression (Exponential)
+Costs scale exponentially for all shop items:
+$$\text{Cost}(L) = \text{BaseCost} \times \text{Multiplier}^L$$
 
 ---
 
-### Bug 2: Inconsistent Cleared/Goal Math
-**Symptom:** Converted Anti-Matter Decay Cells (via `decayResist` upgrades) increment the cleared count, causing the counter to exceed the total standard drifting particles (e.g. displaying `72/53` on the HUD) and prematurely triggering level victory while standard particles are still visible.
+## 🌪️ Dynamic Exponential Difficulty Scaling
 
-#### 🔍 Root Cause Analysis
-1. In `startLevel()`, standard drifting particles are spawned and increment `this.totalDrifting`. Heavy **Anti-Matter Decay Cells** are spawned *in addition* to standard particles and do not count towards `this.totalDrifting`.
-2. When the kinetic shield bypasses a Decay cell, the engine converts it into a standard expanding explosion.
-3. However, inside both conversion bypass blocks in `src/lib/engine.ts` (Splitter spark hits and standard explosion hits), `this.cleared++` is explicitly invoked:
-   * **Splitter Sparks Bypass [engine.ts line 667](file:///C:/Users/David%20Glasser/antigravity/Chain-Reaction/src/lib/engine.ts#L667):**
-     ```typescript
-     this.cleared++; // <-- BUG: Increments clear requirements counter for extra/decay particles!
-     this.combo++;
-     ```
-   * **Standard Explosions Bypass [engine.ts line 747](file:///C:/Users/David%20Glasser/antigravity/Chain-Reaction/src/lib/engine.ts#L747):**
-     ```typescript
-     p1.type = 'STANDARD';
-     p1.state = 'EXPANDING';
-     ...
-     this.cleared++; // <-- BUG: Increments clear requirements counter for extra/decay particles!
-     this.combo++;
-     ```
-4. Because decay cells are *not* part of `this.totalDrifting`, incrementing `this.cleared` when a decay cell explodes pushes `this.cleared` beyond the total drift goal. This results in broken metrics (e.g. `72 / 53` particles) and satisfies the level completion check (`this.cleared >= this.totalDrifting`) prematurely while standard drifting particles are still moving around on screen.
-
-#### 🛠️ Recommended Fix
-1. **Remove `this.cleared++`** from both `decayResist` bypass code blocks in `src/lib/engine.ts` (Line `667` and Line `747`).
-   *This ensures converted decay cells generate chain-reaction cascades and increase combos/shards, but **do not** satisfy the standard cell clearance goal requirements.*
-2. **Defensive Capping in `getStats()` (Optional safety):**
-   In `src/lib/engine.ts`, make sure the reported stats cap `cleared` at the total drifting particles count to prevent display formatting issues:
-   ```typescript
-   cleared: Math.min(this.totalDrifting, this.cleared),
-   ```
+To incentivize shop upgrades, the reactor grid difficulty spikes starting at **Level 5+**:
+1. **Drift Velocity Acceleration:** Standard drifting particles accelerate exponentially:
+   $$\text{SpeedMultiplier} = 1.45 \times 1.18^{\max(0, \text{Level} - 5)}$$
+2. **Hitbox Radius Shrinkage:** Standard drifting particle collision hitboxes shrink exponentially:
+   $$\text{RadiusMultiplier} = \text{BaseRadius} \times 0.88^{\max(0, \text{Level} - 5)}$$
+3. **Void Singularities (`VOID_ANOMALY`):** Up to 6 slow-drifting swirling obstacle zones spawning at Level 3+ that pull atoms in and swallow explosions.
+4. **Anti-Matter Decay Cells (`DECAY`):** Spawn up to a maximum 60% density at Level 2+, resisting magnet sweeps and instantly extinguishing overlapping chain-reactions.
 
 ---
 
-## 🚦 Next Agent Action Plan
+## ⚡ Premium Interactive Monetization Engine
 
-For the incoming agent, please execute the following systematic checklist:
+When a player runs short on Quantum Shards to unlock an upgrade, or fails to clear a sector, the **Quantum Syndicate Portal** modal sheet pops open automatically in `src/App.tsx`.
 
-### Phase 1: Implement Fixes
-- [ ] Add `shopReferrer` state in `src/App.tsx`.
-- [ ] Wire up all `setScreen('SHOP')` calls to record the previous screen state.
-- [ ] Replace the hardcoded `setScreen('START')` back button on the Shop screen with `setScreen(shopReferrer)`.
-- [ ] Remove `this.cleared++;` from the two kinetic shield bypass blocks in `src/lib/engine.ts`.
-- [ ] Add a `Math.min(this.totalDrifting, this.cleared)` cap to `cleared` in `getStats()`.
+### 1. Simulated Fullscreen Rewarded Ads
+* Clicking **WATCH AD COMMS** transitions to a fullscreen countdown overlay (5 seconds).
+* Synthesizes dynamic click ticks on each second (`playAdTick()`).
+* Triggers a C-Major cash register bell chime on completion (`playTransactionChord()`), adds `+250` shards to balance, and floats an emerald banner `+250 Shards Received!` across the dashboard.
 
-### Phase 2: Verification
-- [ ] Verify that there are zero TypeScript compiler issues by running `npx tsc --noEmit`.
-- [ ] Confirm the Vite development server is running correctly (typically `npm run dev` on port `3000`).
-- [ ] **Manual Playtest:**
-  1. Complete Level 1.
-  2. On `'ROUND_OVER'`, enter the Shop.
-  3. Buy an upgrade or leave immediately. Click **BACK**.
-  4. Verify you are back on `'ROUND_OVER'` showing your completed Level 1 stats.
-  5. Click **PROCEED TO LEVEL 2** and verify you correctly start Level 2 instead of repeating Level 1.
-  6. Acquire the `decayResist` shield upgrade.
-  7. Start a level, collide with a decay cell to trigger the green "SHIELDED!" conversion, and confirm that the HUD cleared count does **not** inflate or exceed the denominator (e.g. stays under the total drifting count) and that the round only ends when all standard atoms are cleared.
+### 2. Simulated In-App Purchases (Stripe Checkout)
+* Features 3 premium transaction core packages:
+  * **Mini Shard Cache:** $0.99 for +1,200 ⚡
+  * **Quantum Cargo Core:** $2.49 for +3,500 ⚡
+  * **Singularity Core Pack:** $4.99 for +10,000 ⚡
+* Clicking a package pops up a sleek card authorization dialog with active processing spinner wheels, transaction chimes, and successful verification checkmarks.
 
-Good luck! 💥
+### 3. Decoupled Production-Ready Interconnects
+All monetization overlays are fully decoupled from actual SDK implementations, making them directly swappable with AdMob, Unity Ads, and Stripe payments inside `src/App.tsx`:
+```typescript
+// STREAMING REWARDED AD SDK INTEGRATION HOOK
+const triggerRewardedAd = (onRewardCallback: () => void) => { ... }
+
+// IN-APP PURCHASE PAYMENT SYSTEM GATEWAY
+const processInAppPurchase = (pack: { name: string; price: string; shards: number }, onSuccessCallback: () => void) => { ... }
+```
+
+---
+
+## 🚦 Verification Commands
+
+To check the project compile states or verify static assets, execute the following shell scripts from the root directory:
+```bash
+# Verify TypeScript compiler compliance
+npx tsc --noEmit
+
+# Compile static assets production bundle
+npm run build
+
+# Start local development server (Vite on Port 3000)
+npm run dev
+```
+
+Good luck developing in the Reactor Grid! 💥

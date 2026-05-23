@@ -292,6 +292,44 @@ export default function App() {
     const triggerRewardedAd = (onRewardCallback: () => void) => {
         initAudio();
         playAlertBeep();
+        
+        const isNative = (window as any).Capacitor && (window as any).Capacitor.isNativePlatform();
+        const plugins = (window as any).Capacitor?.Plugins;
+
+        // If running inside native compiled app with AdMob plugin loaded
+        if (isNative && plugins?.AdMob) {
+            try {
+                const AdMob = plugins.AdMob;
+                
+                // Listen for ad completion reward
+                const rewardListener = AdMob.addListener('onRewardedVideoAdRewarded', () => {
+                    playTransactionChord();
+                    onRewardCallback();
+                    rewardListener.remove();
+                });
+
+                AdMob.prepareRewardVideoAd({
+                    adId: (window as any).Capacitor.getPlatform() === 'ios'
+                        ? 'YOUR-IOS-REWARDED-AD-UNIT-ID' 
+                        : 'YOUR-ANDROID-REWARDED-AD-UNIT-ID',
+                }).then(() => {
+                    AdMob.showRewardVideoAd();
+                }).catch((err: any) => {
+                    console.error("AdMob preparation failure", err);
+                    // Fall back to simulation if native preparation failed
+                    runSimulatedAd(onRewardCallback);
+                });
+                return;
+            } catch (err) {
+                console.error("Native AdMob execution failed, falling back to simulated ad", err);
+            }
+        }
+
+        // Web / Local Sandbox Fallback
+        runSimulatedAd(onRewardCallback);
+    };
+
+    const runSimulatedAd = (onRewardCallback: () => void) => {
         setAdActive(true);
         setAdCountdown(5);
         
@@ -311,9 +349,49 @@ export default function App() {
     };
 
     // DECOUPLED IN-APP PURCHASE PAYMENT GATEWAY INTERCONNECT
-    const processInAppPurchase = (pack: { name: string; price: string; shards: number }, onSuccessCallback: () => void) => {
+    const processInAppPurchase = (pack: { name: string; price: string; shards: number; id: string }, onSuccessCallback: () => void) => {
         initAudio();
         playAlertBeep();
+
+        const isNative = (window as any).Capacitor && (window as any).Capacitor.isNativePlatform();
+        const store = (window as any).CdvPurchase?.store || (window as any).store;
+
+        // If running inside native compiled app with In-App Billing loaded
+        if (isNative && store) {
+            try {
+                const productCode = `com.quantum.chainreaction.${pack.id}`;
+                
+                store.register({
+                    id: productCode,
+                    type: store.CONSUMABLE || 'consumable'
+                });
+
+                store.when(productCode)
+                    .approved((transaction: any) => {
+                        transaction.verify();
+                    })
+                    .verified((receipt: any) => {
+                        receipt.finish();
+                        playTransactionChord();
+                        onSuccessCallback();
+                    })
+                    .cancelled(() => {
+                        addFloatNotif("Purchase cancelled");
+                    })
+                    .error((err: any) => {
+                        console.error("IAP Product Error", err);
+                        addFloatNotif("Purchase error occurred");
+                    });
+
+                store.initialize();
+                store.order(productCode);
+                return;
+            } catch (err) {
+                console.error("Native Purchase failed, falling back to simulated purchase", err);
+            }
+        }
+
+        // Web / Local Sandbox Fallback
         setIapPack(pack);
         setIapActive(true);
         setIapSuccess(false);

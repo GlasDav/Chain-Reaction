@@ -5,9 +5,22 @@ export function initAudio() {
     if (!isInitialized) {
         audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
         isInitialized = true;
+        
+        // Auto-pause and auto-resume on app background/foreground
+        if (typeof document !== 'undefined') {
+            document.addEventListener('visibilitychange', () => {
+                if (audioCtx) {
+                    if (document.hidden) {
+                        audioCtx.suspend().catch(e => console.warn("Failed to suspend audio context", e));
+                    } else {
+                        audioCtx.resume().catch(e => console.warn("Failed to resume audio context", e));
+                    }
+                }
+            });
+        }
     }
     if (audioCtx && audioCtx.state === 'suspended') {
-        audioCtx.resume();
+        audioCtx.resume().catch(e => console.warn("Failed to resume audio context", e));
     }
 }
 

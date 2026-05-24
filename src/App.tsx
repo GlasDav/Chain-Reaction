@@ -202,7 +202,14 @@ export default function App() {
     const [isPaused, setIsPaused] = useState(false);
     
     // Persistent stats
-    const [level, setLevel] = useState(1);
+    const [level, setLevel] = useState<number>(() => {
+        try {
+            const saved = localStorage.getItem('chain_reaction_level_v3');
+            return saved ? parseInt(saved, 10) : 1;
+        } catch {
+            return 1;
+        }
+    });
     const [totalScore, setTotalScore] = useState(0);
     const [peakCombo, setPeakCombo] = useState(0);
     const [highScore, setHighScore] = useState(() => {
@@ -596,6 +603,14 @@ export default function App() {
     }, [activeTheme]);
 
     useEffect(() => {
+        try {
+            localStorage.setItem('chain_reaction_level_v3', level.toString());
+        } catch (e) {
+            console.error(e);
+        }
+    }, [level]);
+
+    useEffect(() => {
         if (screen === 'GAME' && canvasRef.current) {
             engineRef.current = new GameEngine(
                 canvasRef.current, 
@@ -865,6 +880,7 @@ export default function App() {
                 localStorage.removeItem('chain_reaction_active_theme_v3');
                 localStorage.removeItem('chain_reaction_clear_streak_v3');
                 localStorage.removeItem('chain_reaction_level_scores_v3');
+                localStorage.removeItem('chain_reaction_level_v3');
             } catch (e) {
                 console.error(e);
             }

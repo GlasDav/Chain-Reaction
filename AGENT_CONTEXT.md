@@ -109,6 +109,7 @@ The interactive grid calculates fabric-warping gravity lines in `engine.ts` rela
 * **Canvas Shadow Elimination:** Avoid Canvas 2D `shadowBlur` operations inside high-frequency frames. Procedural glow rings (concentric filled arcs with alpha falloffs) and black-outlined vector strokes are used instead to keep rendering operations strictly GPU-accelerated.
 
 ### 5. Level-Specific Progress and System Data Resets
+* **Level Progression:** Saves current active level progression in `localStorage` under the key `chain_reaction_level_v3`, restoring the user's grid stage exactly upon relaunch.
 * **Sector High Scores:** Tracks and saves best scores achieved *per level* in `localStorage` under `chain_reaction_level_scores_v3`. Rendered on the results screen as a 3-column stats panel (Current Score, Peak Combo, Sector Best).
 * **Hard Database Wipe:** An accessibility button `[ ⚠️ RESET SYSTEM DATA ]` on the Start screen clears all database storage entries and resets state models back to clean-slate defaults.
 

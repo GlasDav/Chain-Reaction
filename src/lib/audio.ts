@@ -1,5 +1,26 @@
 let audioCtx: AudioContext | null = null;
 let isInitialized = false;
+let isMuted = false;
+
+export function toggleMute() {
+    isMuted = !isMuted;
+    try {
+        if (audioCtx) {
+            if (isMuted) {
+                audioCtx.suspend().catch(e => console.warn("Failed to suspend audio context on mute", e));
+            } else {
+                audioCtx.resume().catch(e => console.warn("Failed to resume audio context on unmute", e));
+            }
+        }
+    } catch (e) {
+        console.error("Mute state switch failure", e);
+    }
+    return isMuted;
+}
+
+export function getMuteState() {
+    return isMuted;
+}
 
 export function initAudio() {
     if (!isInitialized) {
@@ -12,14 +33,14 @@ export function initAudio() {
                 if (audioCtx) {
                     if (document.hidden) {
                         audioCtx.suspend().catch(e => console.warn("Failed to suspend audio context", e));
-                    } else {
+                    } else if (!isMuted) {
                         audioCtx.resume().catch(e => console.warn("Failed to resume audio context", e));
                     }
                 }
             });
         }
     }
-    if (audioCtx && audioCtx.state === 'suspended') {
+    if (audioCtx && audioCtx.state === 'suspended' && !isMuted) {
         audioCtx.resume().catch(e => console.warn("Failed to resume audio context", e));
     }
 }

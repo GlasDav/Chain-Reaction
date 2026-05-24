@@ -149,6 +149,7 @@ export class GameEngine {
     started: boolean = false;
     tapped: boolean = false;
     reqId: number = 0;
+    frameCount: number = 0;
     
     onScoreUpdate: (stats: GameStats) => void;
     onEndRound: (win: boolean, stats: GameStats) => void;
@@ -468,6 +469,7 @@ export class GameEngine {
     }
 
     update() {
+        this.frameCount++;
         this.orbitAngle += 0.05;
 
         // --- REACTOR TURBULENCE / GRAVITY WAVES ---
@@ -510,11 +512,18 @@ export class GameEngine {
 
         // 1. Update actively herded magnets
         if (this.magnetActive && this.magnetFuel > 0) {
-            this.magnetFuel -= 0.55; // Slower burn to give ample planning
+            this.magnetFuel = Math.max(0, this.magnetFuel - 0.55); // Slower burn to give ample planning
             if (this.magnetFuel <= 0) {
                 this.magnetActive = false;
+                this.onScoreUpdate(this.getStats()); // Trigger once when fully depleted
             }
-            this.onScoreUpdate(this.getStats());
+
+            // Direct DOM update instead of full React render
+            const fuelPct = Math.max(0, Math.min(100, Math.round((this.magnetFuel / this.maxMagnetFuel) * 100)));
+            const fuelBar = document.getElementById('magnet-fuel-bar');
+            const fuelText = document.getElementById('magnet-fuel-text');
+            if (fuelBar) fuelBar.style.width = `${fuelPct}%`;
+            if (fuelText) fuelText.innerText = `${fuelPct}%`;
 
             // Gentle gravitational pull
             for (let p of this.particles) {
@@ -542,7 +551,17 @@ export class GameEngine {
             const rechargeRate = rechargeSpeed * 0.06;
             if (this.magnetFuel < this.maxMagnetFuel) {
                 this.magnetFuel = Math.min(this.maxMagnetFuel, this.magnetFuel + rechargeRate);
-                this.onScoreUpdate(this.getStats());
+                
+                // Direct DOM update instead of full React render
+                const fuelPct = Math.max(0, Math.min(100, Math.round((this.magnetFuel / this.maxMagnetFuel) * 100)));
+                const fuelBar = document.getElementById('magnet-fuel-bar');
+                const fuelText = document.getElementById('magnet-fuel-text');
+                if (fuelBar) fuelBar.style.width = `${fuelPct}%`;
+                if (fuelText) fuelText.innerText = `${fuelPct}%`;
+
+                if (this.magnetFuel >= this.maxMagnetFuel) {
+                    this.onScoreUpdate(this.getStats()); // Trigger once when fully charged
+                }
             }
         }
 
@@ -868,10 +887,14 @@ export class GameEngine {
         );
         
         // Visual Juice: Subtle space physics coordinate fabric grid that warps interactively
-        const gridSize = 42;
+        // High-performance adaptive grid density: larger cells on mobile reduces path complexity by over 75%
+        const isMobileScreen = this.width < 768;
+        const gridXStep = isMobileScreen ? 72 : 42;
+        const gridYStep = isMobileScreen ? 60 : 40;
+
         ctx.beginPath();
-        for (let x = 0; x <= this.width + 10; x += gridSize) {
-            for (let y = 0; y <= this.height; y += 40) {
+        for (let x = 0; x <= this.width + 10; x += gridXStep) {
+            for (let y = 0; y <= this.height; y += gridYStep) {
                 let drawX = x;
                 let drawY = y;
                 
@@ -880,8 +903,8 @@ export class GameEngine {
                     const dx = x - this.magnetX;
                     const dy = y - this.magnetY;
                     const distSq = dx*dx + dy*dy;
-                    const dist = Math.sqrt(distSq || 1);
-                    if (dist < 160) {
+                    if (distSq < 25600) { // 160 * 160
+                        const dist = Math.sqrt(distSq || 1);
                         const pullPower = (1 - dist / 160) * 18 * (this.magnetFuel / 100);
                         drawX -= (dx / dist) * pullPower;
                         drawY -= (dy / dist) * pullPower;
@@ -893,9 +916,10 @@ export class GameEngine {
                     const dx = x - gp.x;
                     const dy = y - gp.y;
                     const distSq = dx*dx + dy*dy;
-                    const dist = Math.sqrt(distSq || 1);
-                    if (dist < gp.radius + 30) {
-                        const pullPower = (1 - dist / (gp.radius + 30)) * 14;
+                    const maxDist = gp.radius + 30;
+                    if (distSq < maxDist * maxDist) {
+                        const dist = Math.sqrt(distSq || 1);
+                        const pullPower = (1 - dist / maxDist) * 14;
                         drawX -= (dx / dist) * pullPower;
                         drawY -= (dy / dist) * pullPower;
                     }
@@ -913,8 +937,8 @@ export class GameEngine {
         ctx.stroke();
 
         ctx.beginPath();
-        for (let y = 0; y <= this.height + 10; y += gridSize) {
-            for (let x = 0; x <= this.width; x += 40) {
+        for (let y = 0; y <= this.height + 10; y += gridXStep) {
+            for (let x = 0; x <= this.width; x += gridYStep) {
                 let drawX = x;
                 let drawY = y;
                 
@@ -922,8 +946,8 @@ export class GameEngine {
                     const dx = x - this.magnetX;
                     const dy = y - this.magnetY;
                     const distSq = dx*dx + dy*dy;
-                    const dist = Math.sqrt(distSq || 1);
-                    if (dist < 160) {
+                    if (distSq < 25600) { // 160 * 160
+                        const dist = Math.sqrt(distSq || 1);
                         const pullPower = (1 - dist / 160) * 18 * (this.magnetFuel / 100);
                         drawX -= (dx / dist) * pullPower;
                         drawY -= (dy / dist) * pullPower;
@@ -934,9 +958,10 @@ export class GameEngine {
                     const dx = x - gp.x;
                     const dy = y - gp.y;
                     const distSq = dx*dx + dy*dy;
-                    const dist = Math.sqrt(distSq || 1);
-                    if (dist < gp.radius + 30) {
-                        const pullPower = (1 - dist / (gp.radius + 30)) * 14;
+                    const maxDist = gp.radius + 30;
+                    if (distSq < maxDist * maxDist) {
+                        const dist = Math.sqrt(distSq || 1);
+                        const pullPower = (1 - dist / maxDist) * 14;
                         drawX -= (dx / dist) * pullPower;
                         drawY -= (dy / dist) * pullPower;
                     }
@@ -976,12 +1001,20 @@ export class GameEngine {
                 ctx.stroke();
             }
 
-            // Central particle source glow
+            // Central particle source procedural glow (no expensive shadowBlur!)
             ctx.beginPath();
-            ctx.arc(this.magnetX, this.magnetY, 4, 0, Math.PI * 2);
+            ctx.arc(this.magnetX, this.magnetY, 12, 0, Math.PI * 2);
+            ctx.fillStyle = 'rgba(250, 204, 21, 0.2)';
+            ctx.fill();
+            
+            ctx.beginPath();
+            ctx.arc(this.magnetX, this.magnetY, 7, 0, Math.PI * 2);
+            ctx.fillStyle = 'rgba(250, 204, 21, 0.4)';
+            ctx.fill();
+
+            ctx.beginPath();
+            ctx.arc(this.magnetX, this.magnetY, 3.5, 0, Math.PI * 2);
             ctx.fillStyle = '#FFFFFF';
-            ctx.shadowBlur = 15;
-            ctx.shadowColor = '#facc15';
             ctx.fill();
         }
 
@@ -1201,8 +1234,7 @@ export class GameEngine {
             ctx.font = 'bold 15px sans-serif';
             ctx.textAlign = 'center';
             ctx.fillStyle = t.color;
-            ctx.shadowBlur = 5;
-            ctx.shadowColor = '#000000';
+            ctx.strokeStyle = '#000000';
             ctx.lineWidth = 3;
             ctx.strokeText(t.text, t.x, t.y);
             ctx.fillText(t.text, t.x, t.y);

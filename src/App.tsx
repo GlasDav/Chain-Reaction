@@ -11,7 +11,9 @@ import {
     playDefeatSound,
     playAdTick,
     playTransactionChord,
-    playAlertBeep
+    playAlertBeep,
+    toggleMute,
+    getMuteState
 } from './lib/audio';
 import { 
     Cpu,
@@ -33,7 +35,10 @@ import {
     Trophy,
     Shield,
     Video,
-    CreditCard
+    CreditCard,
+    Pause,
+    Volume2,
+    VolumeX
 } from 'lucide-react';
 
 type Screen = 'START' | 'GAME' | 'ROUND_OVER' | 'SHOP';
@@ -193,6 +198,8 @@ export default function App() {
     const [screen, setScreen] = useState<Screen>('START');
     const [shopReferrer, setShopReferrer] = useState<Screen>('START');
     const [showHelp, setShowHelp] = useState(false);
+    const [isMuted, setIsMuted] = useState(() => getMuteState());
+    const [isPaused, setIsPaused] = useState(false);
     
     // Persistent stats
     const [level, setLevel] = useState(1);
@@ -241,6 +248,15 @@ export default function App() {
             return (saved as ParticleTheme) || 'STANDARD';
         } catch {
             return 'STANDARD';
+        }
+    });
+
+    const [levelHighScores, setLevelHighScores] = useState<Record<number, number>>(() => {
+        try {
+            const saved = localStorage.getItem('chain_reaction_level_scores_v3');
+            return saved ? JSON.parse(saved) : {};
+        } catch {
+            return {};
         }
     });
 
@@ -445,6 +461,22 @@ export default function App() {
         
         const perfect = stats.cleared === stats.totalParticles && stats.totalParticles > 0;
         setIsPerfectClear(perfect);
+
+        // Track and persist sector score attempt
+        const attemptScore = stats.cleared * 100 + stats.maxCombo * 50 + (perfect ? 2500 : 0);
+        setLevelHighScores(prev => {
+            const prevBest = prev[level] || 0;
+            if (attemptScore > prevBest) {
+                const next = { ...prev, [level]: attemptScore };
+                try {
+                    localStorage.setItem('chain_reaction_level_scores_v3', JSON.stringify(next));
+                } catch (e) {
+                    console.error(e);
+                }
+                return next;
+            }
+            return prev;
+        });
 
         // Required count to win
         const requiredCount = Math.max(1, Math.floor(stats.totalParticles * (stats.targetPct / 100)));
@@ -679,7 +711,6 @@ export default function App() {
             setShards(s => s - fee);
             setNearMissSparksPurchased(n => n + 1);
             setIsNearMissScreen(false);
-            setScreen('GAME');
             engineRef.current.resumeWithExtraSpark();
         }
     };
@@ -694,6 +725,40 @@ export default function App() {
             setConsolationShardsAwarded(consolationReward);
             setShards(prev => prev + consolationReward);
             playDefeatSound(); // Play defeat arpeggio
+        }
+        setScreen('ROUND_OVER');
+    };
+
+    const pauseGame = () => {
+        if (engineRef.current && engineRef.current.started && !isPaused) {
+            engineRef.current.started = false;
+            setIsPaused(true);
+        }
+    };
+
+    const resumeGame = () => {
+        if (engineRef.current && !engineRef.current.started && isPaused) {
+            engineRef.current.started = true;
+            setIsPaused(false);
+            engineRef.current.loop();
+        }
+    };
+
+    const restartLevel = () => {
+        setIsPaused(false);
+        setIsNearMissScreen(false);
+        if (engineRef.current) {
+            engineRef.current.startLevel(level, upgrades, activeTheme);
+        }
+    };
+
+    const forfeitActiveGame = () => {
+        setIsPaused(false);
+        setIsNearMissScreen(false);
+        if (engineRef.current) {
+            engineRef.current.started = false;
+            const stats = engineRef.current.getStats();
+            handleRoundEnd(false, stats);
         }
     };
 
@@ -789,18 +854,163 @@ export default function App() {
         playPurchaseConfirm();
     };
 
+    const resetAllProgress = () => {
+        const confirmReset = window.confirm("⚠️ WARNING: THIS WILL PERMANENTLY WIPE ALL YOUR QUANTUM PROGRESS, SHARDS, LEVEL SCORES, UNLOCKED THEMES, AND UPGRADES! ARE YOU SURE?");
+        if (confirmReset) {
+            try {
+                localStorage.removeItem('chain_reaction_high_score_v2');
+                localStorage.removeItem('chain_reaction_shards_v3');
+                localStorage.removeItem('chain_reaction_upgrades_v3');
+                localStorage.removeItem('chain_reaction_purchased_themes_v3');
+                localStorage.removeItem('chain_reaction_active_theme_v3');
+                localStorage.removeItem('chain_reaction_clear_streak_v3');
+                localStorage.removeItem('chain_reaction_level_scores_v3');
+            } catch (e) {
+                console.error(e);
+            }
+            
+            // Reset React state
+            setLevel(1);
+            setHighScore(0);
+            setShards(30); // reset back to standard 30 gifted starting shards
+            setUpgrades({
+                extraSparks: 0,
+                maxMagnetFuel: 0,
+                magnetPower: 0,
+                sparkRadiusBoost: 0,
+                specialSpawnRate: 0,
+                resonanceDuration: 0,
+                decayResist: 0,
+                comboShardMultiplier: 0,
+                magnetAutopilot: 0
+            });
+            setPurchasedThemes(['STANDARD']);
+            setActiveTheme('STANDARD');
+            setClearStreak(0);
+            setLevelHighScores({});
+            setTotalScore(0);
+            setPeakCombo(0);
+            
+            addFloatNotif("REACTOR DATABASES DECLASSIFIED & RESET!");
+        }
+    };
+
     // Circle progress indicators setup parameters matching design specs
     const targetProgressSq = liveStats ? Math.min(100, Math.round((liveStats.cleared / liveStats.totalRequired) * 100)) : 0;
     const progressRadius = 22;
     const progressCirc = 2 * Math.PI * progressRadius; // 138.2
     const strokeOffset = progressCirc - (targetProgressSq / 100) * progressCirc;
 
+    // Detect mobile screens or native Capacitor platform
+    const isMobileDevice = typeof window !== 'undefined' && (window.innerWidth < 768 || (window as any).Capacitor?.isNativePlatform());
+
     return (
-        <div className="flex flex-col md:flex-row items-center justify-center min-h-screen bg-[#050505] text-white selection:bg-none p-4 font-sans gap-8">
+        <div className={`flex flex-col md:flex-row items-center justify-center bg-[#050505] text-white selection:bg-none font-sans ${
+            isMobileDevice 
+                ? 'fixed inset-0 w-full h-full p-0 gap-0 overflow-hidden' 
+                : 'min-h-screen p-4 gap-8'
+        }`}>
             
             {/* Left Column: Tactical Game Dashboard Window */}
-            <div className="w-full max-w-[380px] h-[80vh] min-h-[640px] border-[12px] border-[#1a1a1e] rounded-[48px] overflow-hidden relative shadow-2xl bg-[#0c0c0e] flex flex-col">
-                <div className="h-6 w-32 bg-[#1a1a1e] absolute top-0 left-1/2 -translate-x-1/2 rounded-b-2xl z-50 pointer-events-none"></div>
+            <div className={`w-full relative bg-[#0c0c0e] flex flex-col shadow-2xl transition-all duration-300 ${
+                isMobileDevice 
+                    ? 'h-full w-full border-0 rounded-none' 
+                    : 'max-w-[380px] h-[80vh] min-h-[640px] border-[12px] border-[#1a1a1e] rounded-[48px] overflow-hidden'
+            }`}>
+                {!isMobileDevice && (
+                    <div className="h-6 w-32 bg-[#1a1a1e] absolute top-0 left-1/2 -translate-x-1/2 rounded-b-2xl z-50 pointer-events-none"></div>
+                )}
+                
+                {/* DYNAMIC SCROLLABLE MANUAL OVERLAY FOR MOBILE/COMPACT SCREENS */}
+                {showHelp && (
+                    <div className="absolute inset-0 flex flex-col p-6 z-50 bg-[#0c0c0e]/98 overflow-y-auto pt-10 select-none scrollbar-none animate-fadeIn">
+                        <div className="flex items-center justify-between mb-4 pb-3 border-b border-zinc-800">
+                            <button 
+                                onClick={() => setShowHelp(false)}
+                                className="flex items-center gap-1 text-zinc-400 hover:text-white transition-colors text-xs font-bold uppercase tracking-wider cursor-pointer"
+                            >
+                                <ChevronLeft className="w-4 h-4 text-cyan-400" />
+                                BACK TO MAIN
+                            </button>
+                        </div>
+                        
+                        {/* MANUAL CONTENT */}
+                        <div className="space-y-4 text-left">
+                            <div>
+                                <h2 className="text-xl font-black italic text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-fuchsia-400 uppercase tracking-tighter leading-none mb-1">
+                                    SCI-OPS TACTICAL DIRECTIVE
+                                </h2>
+                                <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider">
+                                    REACTOR MANUAL & INTEL
+                                </p>
+                            </div>
+                            
+                            <p className="text-zinc-400 text-xs leading-relaxed font-medium">
+                                Trigger precise kinetic sweeps and herd particle cascades with your gravity magnet. Reactor volatility increases grid speeds exponentially at higher levels.
+                            </p>
+
+                            <div className="space-y-2 font-sans text-xs">
+                                <div className="p-2.5 rounded-xl bg-gradient-to-r from-red-500/15 via-orange-500/5 to-red-500/15 border border-red-500/20 flex gap-3 items-start">
+                                    <span className="flex-shrink-0 text-red-400 text-sm animate-pulse">🚨</span>
+                                    <div>
+                                        <h4 className="font-bold text-red-400 tracking-tight uppercase text-[9px]">100% Sector Clear Required</h4>
+                                        <p className="text-[11px] text-zinc-300 leading-normal font-medium">To advance, you must liquidate 100% of the drifting particles! Perfect clearances also yield a massive +2,500 pts and +350 bonus Shards.</p>
+                                    </div>
+                                </div>
+
+                                <div className="flex gap-3 items-start p-2.5 rounded-xl bg-white/5 border border-white/5">
+                                    <span className="flex-shrink-0 w-6 h-6 rounded-full bg-[#e879f9]/20 border border-[#e879f9]/50 flex items-center justify-center text-xs text-[#e879f9] font-black leading-none">
+                                        🟣
+                                    </span>
+                                    <div>
+                                        <h4 className="font-bold text-[#e879f9] tracking-tight uppercase text-[10px]">Gravity Pulse Core</h4>
+                                        <p className="text-[11px] text-zinc-300 leading-normal">Pulls all shifting atoms closely toward itself during explosions. Creates robust chain reaction nodes.</p>
+                                    </div>
+                                </div>
+
+                                <div className="flex gap-3 items-start p-2.5 rounded-xl bg-white/5 border border-white/5">
+                                    <span className="flex-shrink-0 w-6 h-6 rounded-full bg-[#facc15]/20 border border-[#facc15]/50 flex items-center justify-center text-xs text-[#facc15] font-black leading-none font-mono">
+                                        🟡
+                                    </span>
+                                    <div>
+                                        <h4 className="font-bold text-[#facc15] tracking-tight uppercase text-[10px]">Cross Star Splitter</h4>
+                                        <p className="text-[11px] text-zinc-300 leading-normal">Detonates into an 8-axis laser surge comet swarm, igniting volatile elements across long distances.</p>
+                                    </div>
+                                </div>
+
+                                <div className="flex gap-3 items-start p-2.5 rounded-xl bg-white/5 border border-white/5">
+                                    <span className="flex-shrink-0 w-6 h-6 rounded-full bg-cyan-400/20 border border-cyan-400/50 flex items-center justify-center text-xs text-cyan-400 font-bold leading-none">
+                                        🟢
+                                    </span>
+                                    <div>
+                                        <h4 className="font-bold text-cyan-400 tracking-tight uppercase text-[10px]">Standard Element</h4>
+                                        <p className="text-[11px] text-zinc-300 leading-normal">Molecular drifting cells. Hitboxes shrink and speed increases radically based on current Level.</p>
+                                    </div>
+                                </div>
+
+                                <div className="flex gap-3 items-start p-2.5 rounded-xl bg-red-950/20 border border-red-500/20">
+                                    <span className="flex-shrink-0 w-6 h-6 rounded-full bg-red-400/20 border border-red-500 flex items-center justify-center text-xs text-red-400 font-bold leading-none font-mono">
+                                        ✖
+                                    </span>
+                                    <div>
+                                        <h4 className="font-bold text-red-400 tracking-tight uppercase text-[10px]">Anti-Matter Decay Cell</h4>
+                                        <p className="text-[11px] text-red-300/90 leading-normal">Heavy atoms spawning at Lvl 2+. They resist sweeps, block split comets, and **instantly extinguish** touching explosions!</p>
+                                    </div>
+                                </div>
+
+                                <div className="flex gap-3 items-start p-2.5 rounded-xl bg-rose-950/30 border border-rose-500/35">
+                                    <span className="flex-shrink-0 w-6 h-6 rounded-full bg-rose-400/20 border border-rose-500 flex items-center justify-center text-xs text-rose-400 font-bold leading-none">
+                                        🌀
+                                    </span>
+                                    <div>
+                                        <h4 className="font-bold text-rose-400 tracking-tight uppercase text-[10px]">Void Singularity Hazard</h4>
+                                        <p className="text-[11px] text-rose-300/90 leading-normal">Swirling crimson hazards at Lvl 3+. They drift slowly, drag standard particles, but **instantly swallow** touching explosions!</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                )}
                 
                 {/* START SCREEN */}
                 {screen === 'START' && (
@@ -846,6 +1056,13 @@ export default function App() {
                         <div className="text-center">
                             <span className="block text-[10px] text-zinc-500 uppercase tracking-widest font-black">RECORD STANDING</span>
                             <span className="text-xl font-black font-mono text-cyan-400">{highScore.toLocaleString()} pts</span>
+                            
+                            <button 
+                                onClick={resetAllProgress}
+                                className="block mt-4 mx-auto text-[9px] text-zinc-650 hover:text-rose-500 font-bold uppercase tracking-widest transition-colors cursor-pointer select-none"
+                            >
+                                [ ⚠️ RESET SYSTEM DATA ]
+                            </button>
                         </div>
                     </div>
                 )}
@@ -1081,7 +1298,16 @@ export default function App() {
                         </div>
 
                         <div className="flex flex-col items-end">
-                            <span className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold">Cleared</span>
+                            <span className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold flex items-center gap-1.5 justify-end">
+                                Cleared
+                                <button 
+                                    onClick={pauseGame}
+                                    className="p-1.5 rounded-lg bg-zinc-900/90 border border-zinc-800 text-zinc-400 hover:text-white pointer-events-auto hover:bg-zinc-800 active:scale-90 transition-all cursor-pointer flex items-center justify-center shadow-sm"
+                                    title="Pause Game"
+                                >
+                                    <Pause className="w-3 h-3 text-cyan-400 fill-cyan-400" />
+                                </button>
+                            </span>
                             <span className="text-2xl font-black text-cyan-400">
                                 {liveStats.cleared}<span className="text-xs font-normal text-zinc-500">/{liveStats.totalParticles}</span>
                             </span>
@@ -1102,29 +1328,29 @@ export default function App() {
 
                 {/* ACTIVE INTERACTIVE BOTTOM PANEL FOR HERDER MECHANICS */}
                 {screen === 'GAME' && liveStats && (
-                    <div className="absolute bottom-28 left-0 right-0 px-6 py-2 flex flex-col gap-1 pointer-events-none z-40 text-center items-center">
+                    <div className="absolute bottom-6 left-6 right-6 pointer-events-none z-40 text-center flex flex-col items-center justify-end">
                         {liveStats.sparksLeft > 0 ? (
-                            <div className="w-full flex flex-col items-center bg-slate-950/75 border border-white/5 p-3 rounded-2xl backdrop-blur-md">
-                                <div className="flex justify-between w-full items-center mb-1 bg-none">
-                                    <span className="text-[9px] uppercase tracking-widest text-yellow-400 font-bold flex items-center gap-1">
-                                        <Magnet className="w-3 h-3 text-yellow-400" /> SWEEPER CHARGE
-                                    </span>
-                                    <span className="text-xs font-mono font-bold text-yellow-400">
-                                        {Math.round((liveStats.magnetFuel / liveStats.maxMagnetFuel) * 100)}%
-                                    </span>
-                                </div>
-                                <div className="w-full h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+                            <div className="flex items-center gap-2.5 justify-center bg-slate-950/85 border border-white/5 px-3.5 py-2 rounded-full backdrop-blur-md max-w-[240px] w-full shadow-lg">
+                                <Magnet className="w-3.5 h-3.5 text-yellow-400 flex-shrink-0 animate-pulse" />
+                                <div className="flex-1 h-1.5 bg-zinc-800 rounded-full overflow-hidden">
                                     <div 
+                                        id="magnet-fuel-bar"
                                         className="h-full bg-gradient-to-r from-yellow-500 to-orange-500 transition-all duration-75"
                                         style={{ width: `${(liveStats.magnetFuel / liveStats.maxMagnetFuel) * 100}%` }}
                                     />
                                 </div>
-                                <span className="text-[8px] text-zinc-400 mt-1 uppercase font-bold leading-none tracking-wide text-center">
-                                    Drag to sweep & herd. Click to spark spark cascade ({liveStats.sparksLeft} left).
+                                <span 
+                                    id="magnet-fuel-text"
+                                    className="text-[10px] font-bold font-mono text-yellow-400 flex-shrink-0"
+                                >
+                                    {Math.round((liveStats.magnetFuel / liveStats.maxMagnetFuel) * 100)}%
+                                </span>
+                                <span className="text-[9px] text-zinc-500 font-bold flex-shrink-0">
+                                    ({liveStats.sparksLeft} ⚡)
                                 </span>
                             </div>
                         ) : (
-                            <div className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-cyan-950/40 border border-cyan-800/30 backdrop-blur-md text-[10px] font-bold text-cyan-300 uppercase tracking-widest animate-pulse">
+                            <div className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-cyan-950/50 border border-cyan-800/30 backdrop-blur-md text-[10px] font-bold text-cyan-300 uppercase tracking-widest animate-pulse shadow-lg">
                                 <Zap className="w-3 h-3 text-cyan-400 fill-cyan-400" /> Systemic reaction cascading...
                             </div>
                         )}
@@ -1132,72 +1358,139 @@ export default function App() {
                 )}
 
                 {/* ROUND OVER STATUS SCREEN DISPLAY */}
+                {/* IN-GAME PAUSE MENU OVERLAY */}
+                {screen === 'GAME' && isPaused && (
+                    <div className="absolute inset-0 flex flex-col items-center justify-center p-8 text-center z-50 bg-[#0c0c0e]/95 backdrop-blur-md select-none animate-fadeIn pointer-events-auto">
+                        <div className="mb-4 inline-flex items-center justify-center bg-cyan-900/20 text-cyan-400 border border-cyan-500/30 p-4 rounded-full shadow-[0_0_20px_rgba(34,211,238,0.25)]">
+                            <Pause className="w-8 h-8 text-cyan-400 fill-cyan-400 animate-pulse" />
+                        </div>
+                        <h2 className="text-3xl font-black italic tracking-tighter uppercase leading-none mb-1 text-white drop-shadow-[0_0_15px_rgba(34,211,238,0.3)]">
+                            REACTOR PAUSED
+                        </h2>
+                        <p className="text-zinc-500 text-[10px] tracking-widest uppercase mb-10 font-bold">GRID OPERATIONS TEMPORARILY HALTED</p>
+                        
+                        <div className="space-y-3.5 w-full mb-6">
+                            {/* Resume button */}
+                            <button 
+                                onClick={resumeGame}
+                                className="w-full bg-white text-black py-3.5 rounded-xl font-black text-sm flex items-center justify-center gap-2 hover:scale-103 active:scale-97 transition-all shadow-[0_0_15px_rgba(255,255,255,0.15)] cursor-pointer"
+                            >
+                                <Play className="w-4 h-4 fill-black text-black" />
+                                RESUME REACTION
+                            </button>
+
+                            {/* Restart level */}
+                            <button 
+                                onClick={restartLevel}
+                                className="w-full bg-zinc-900 border border-zinc-800 text-zinc-200 py-3 rounded-xl text-xs font-black uppercase tracking-wider hover:bg-zinc-800 active:scale-97 transition-all cursor-pointer flex items-center justify-center gap-2"
+                            >
+                                <RotateCcw className="w-4 h-4 text-cyan-400" />
+                                RESTART SECTOR
+                            </button>
+
+                            {/* Sound Mute Toggle */}
+                            <button 
+                                onClick={() => {
+                                    const muted = toggleMute();
+                                    setIsMuted(muted);
+                                    playAlertBeep();
+                                }}
+                                className="w-full bg-zinc-900 border border-zinc-800 text-zinc-200 py-3 rounded-xl text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 hover:bg-zinc-800 active:scale-97 transition-all cursor-pointer"
+                            >
+                                {isMuted ? (
+                                    <>
+                                        <VolumeX className="w-4 h-4 text-red-400 animate-pulse" />
+                                        UNMUTE COMMS (SOUND OFF)
+                                    </>
+                                ) : (
+                                    <>
+                                        <Volume2 className="w-4 h-4 text-emerald-400 animate-bounce" />
+                                        MUTE COMMS (SOUND ON)
+                                    </>
+                                )}
+                            </button>
+
+                            {/* Forfeit game */}
+                            <button 
+                                onClick={forfeitActiveGame}
+                                className="w-full bg-red-950/20 border border-red-500/20 text-red-400 py-3 rounded-xl text-xs font-black uppercase tracking-wider hover:bg-red-950/40 active:scale-97 transition-all cursor-pointer flex items-center justify-center gap-2"
+                            >
+                                Forfeit Sweep
+                            </button>
+                        </div>
+                    </div>
+                )}
+
+                {/* IN-GAME NEAR-MISS OVERLAY */}
+                {screen === 'GAME' && liveStats && isNearMissScreen && (
+                    <div className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center z-50 bg-[#0c0c0e]/95 backdrop-blur-lg select-none overflow-y-auto pointer-events-auto">
+                        <div className="w-full flex flex-col items-center">
+                            <div className="mb-2 mt-4 inline-flex items-center justify-center p-4 bg-red-950/40 border border-red-500/50 rounded-full animate-bounce">
+                                <AlertTriangle className="w-10 h-10 text-red-500 fill-red-500 animate-pulse" />
+                            </div>
+                            
+                            <div className="mb-1 inline-flex items-center gap-1.5 px-3 py-1 bg-red-500/10 border border-red-500/30 rounded-full text-red-500 font-extrabold text-[10px] uppercase tracking-widest animate-pulse">
+                                ⚠️ INSTABILITY WARNING ⚠️
+                            </div>
+
+                            <h2 className="text-3xl font-black italic tracking-tighter uppercase leading-none mb-1 text-red-500 drop-shadow-[0_0_15px_rgba(239,68,68,0.4)]">
+                                CRITICAL NEAR-MISS!
+                            </h2>
+                            
+                            <p className="text-zinc-400 text-xs font-bold leading-relaxed max-w-[270px] mb-4">
+                                Grid reached <span className="text-white font-extrabold">{Math.round((liveStats.cleared/liveStats.totalRequired)*100)}%</span> of target progress. Stabilize reactor immediately before gravity collapse!
+                            </p>
+
+                            {/* Progress statistics */}
+                            <div className="p-3 w-full bg-red-950/10 border border-red-500/20 rounded-2xl mb-4 text-center">
+                                <div className="flex justify-between text-xs text-zinc-300 font-bold mb-1">
+                                    <span>CELLS DETONATED:</span>
+                                    <span className="text-white">{liveStats.cleared} / {liveStats.totalRequired}</span>
+                                </div>
+                                <div className="w-full h-2 bg-zinc-900 rounded-full overflow-hidden">
+                                    <div 
+                                        className="h-full bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.8)]"
+                                        style={{ width: `${Math.min(100, (liveStats.cleared / liveStats.totalRequired) * 100)}%` }}
+                                    />
+                                </div>
+                                <span className="block text-[8px] text-zinc-500 uppercase font-black tracking-widest mt-1.5">COLLAPSE THRESHOLD DETECTED</span>
+                            </div>
+
+                            {/* Shards status and buy decision */}
+                            <div className="w-full space-y-2.5 mb-2">
+                                <button 
+                                    onClick={buySecondChanceSpark}
+                                    disabled={shards < 50 * (nearMissSparksPurchased + 1)}
+                                    className={`w-full py-4 rounded-xl font-extrabold text-sm flex flex-col items-center justify-center gap-0.5 transition-all shadow-[0_0_20px_rgba(239,68,68,0.15)] ${
+                                        shards >= 50 * (nearMissSparksPurchased + 1)
+                                            ? 'bg-gradient-to-r from-red-500 to-orange-500 hover:scale-103 active:scale-97 text-black cursor-pointer font-black'
+                                            : 'bg-zinc-900 text-zinc-600 border border-zinc-800 cursor-not-allowed'
+                                    }`}
+                                >
+                                    <span className="flex items-center gap-1 uppercase tracking-wider text-xs font-black">
+                                        <Zap className="w-4 h-4 text-black fill-black" /> SECURE SECOND-CHANCE SPARK
+                                    </span>
+                                    <span className="text-[10px] font-bold opacity-80">
+                                        Cost: {50 * (nearMissSparksPurchased + 1)} ⚡ (Your Shards: {shards} ⚡)
+                                    </span>
+                                </button>
+
+                                <button 
+                                    onClick={forfeitNearMissRound}
+                                    className="w-full bg-zinc-800/40 hover:bg-zinc-800 text-zinc-400 py-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2 border border-zinc-700/80 active:scale-95 transition-all cursor-pointer uppercase tracking-wider"
+                                >
+                                    💔 FORFEIT SWEEP & EXTRACT CONSOLATION CORES
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {/* ROUND OVER STATUS SCREEN DISPLAY */}
                 {screen === 'ROUND_OVER' && liveStats && (
                     <div className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center z-40 bg-[#0c0c0e]/95 backdrop-blur-lg select-none overflow-y-auto">
                         
-                        {isNearMissScreen ? (
-                            /* HIGH ALERT NEAR-MISS POPUP OVERLAY */
-                            <div className="w-full flex flex-col items-center">
-                                <div className="mb-2 mt-4 inline-flex items-center justify-center p-4 bg-red-950/40 border border-red-500/50 rounded-full animate-bounce">
-                                    <AlertTriangle className="w-10 h-10 text-red-500 fill-red-500 animate-pulse" />
-                                </div>
-                                
-                                <div className="mb-1 inline-flex items-center gap-1.5 px-3 py-1 bg-red-500/10 border border-red-500/30 rounded-full text-red-500 font-extrabold text-[10px] uppercase tracking-widest animate-pulse">
-                                    ⚠️ INSTABILITY WARNING ⚠️
-                                </div>
-
-                                <h2 className="text-3xl font-black italic tracking-tighter uppercase leading-none mb-1 text-red-500 drop-shadow-[0_0_15px_rgba(239,68,68,0.4)]">
-                                    CRITICAL NEAR-MISS!
-                                </h2>
-                                
-                                <p className="text-zinc-400 text-xs font-bold leading-relaxed max-w-[270px] mb-4">
-                                    Grid reached <span className="text-white font-extrabold">{Math.round((liveStats.cleared/liveStats.totalRequired)*100)}%</span> of target progress. Stabilize reactor immediately before gravity collapse!
-                                </p>
-
-                                {/* Progress statistics */}
-                                <div className="p-3 w-full bg-red-950/10 border border-red-500/20 rounded-2xl mb-4 text-center">
-                                    <div className="flex justify-between text-xs text-zinc-300 font-bold mb-1">
-                                        <span>CELLS DETONATED:</span>
-                                        <span className="text-white">{liveStats.cleared} / {liveStats.totalRequired}</span>
-                                    </div>
-                                    <div className="w-full h-2 bg-zinc-900 rounded-full overflow-hidden">
-                                        <div 
-                                            className="h-full bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.8)]"
-                                            style={{ width: `${Math.min(100, (liveStats.cleared / liveStats.totalRequired) * 100)}%` }}
-                                        />
-                                    </div>
-                                    <span className="block text-[8px] text-zinc-500 uppercase font-black tracking-widest mt-1.5">COLLAPSE THRESHOLD DETECTED</span>
-                                </div>
-
-                                {/* Shards status and buy decision */}
-                                <div className="w-full space-y-2.5 mb-2">
-                                    <button 
-                                        onClick={buySecondChanceSpark}
-                                        disabled={shards < 50 * (nearMissSparksPurchased + 1)}
-                                        className={`w-full py-4 rounded-xl font-extrabold text-sm flex flex-col items-center justify-center gap-0.5 transition-all shadow-[0_0_20px_rgba(239,68,68,0.15)] ${
-                                            shards >= 50 * (nearMissSparksPurchased + 1)
-                                                ? 'bg-gradient-to-r from-red-500 to-orange-500 hover:scale-103 active:scale-97 text-black cursor-pointer font-black'
-                                                : 'bg-zinc-900 text-zinc-600 border border-zinc-800 cursor-not-allowed'
-                                        }`}
-                                    >
-                                        <span className="flex items-center gap-1 uppercase tracking-wider text-xs">
-                                            <Zap className="w-4 h-4 text-black fill-black" /> SECURE SECOND-CHANCE SPARK
-                                        </span>
-                                        <span className="text-[10px] font-bold opacity-80">
-                                            Cost: {50 * (nearMissSparksPurchased + 1)} ⚡ (Your Shards: {shards} ⚡)
-                                        </span>
-                                    </button>
-
-                                    <button 
-                                        onClick={forfeitNearMissRound}
-                                        className="w-full bg-zinc-800/40 hover:bg-zinc-800 text-zinc-400 py-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2 border border-zinc-700/80 active:scale-95 transition-all cursor-pointer uppercase tracking-wider"
-                                    >
-                                        💔 FORFEIT SWEEP & EXTRACT CONSOLATION CORES
-                                    </button>
-                                </div>
-                            </div>
-                        ) : (
-                            /* STANDARD OR SUCCESS DISPLAY WITH SLOT MACHINE MUTATOR REELS */
+                        {/* STANDARD OR SUCCESS DISPLAY WITH SLOT MACHINE MUTATOR REELS */}
                             <div className="w-full flex flex-col items-center">
                                 <div className="mb-2 mt-2 inline-flex items-center justify-center p-3 rounded-full border border-white/10">
                                     {isPerfectClear ? (
@@ -1246,15 +1539,28 @@ export default function App() {
                                             : `Reaction died prior to clearance objective. Required: ${liveStats.totalRequired}.`}
                                 </p>
 
-                                <div className="grid grid-cols-2 gap-3 w-full mb-3">
-                                    <div className="p-3 rounded-2xl bg-white/5 border border-white/10 flex flex-col items-center relative overflow-hidden">
+                                <div className="grid grid-cols-3 gap-2 w-full mb-3">
+                                    <div className="p-2.5 rounded-2xl bg-white/5 border border-white/10 flex flex-col items-center relative overflow-hidden">
                                         {isPerfectClear && <div className="absolute inset-0 bg-yellow-400/5 animate-pulse" />}
-                                        <span className="block text-[8px] font-bold text-zinc-500 uppercase tracking-widest leading-none mb-1">CLEARED SCORE</span>
-                                        <span className="text-xl font-black text-cyan-400 font-mono">+{liveStats.cleared * 100}</span>
+                                        <span className="block text-[7px] font-bold text-zinc-500 uppercase tracking-widest leading-none mb-1">SCORE</span>
+                                        <span className="text-base font-black text-cyan-400 font-mono">
+                                            {liveStats.cleared * 100 + liveStats.maxCombo * 50 + (isPerfectClear ? 2500 : 0)}
+                                        </span>
                                     </div>
-                                    <div className="p-3 rounded-2xl bg-white/5 border border-white/10 flex flex-col items-center flex-col items-center">
-                                        <span className="block text-[8px] font-bold text-zinc-500 uppercase tracking-widest leading-none mb-1">PEAK COMBO</span>
-                                        <span className="text-xl font-black text-yellow-400 italic font-mono">{liveStats.maxCombo}x</span>
+                                    <div className="p-2.5 rounded-2xl bg-white/5 border border-white/10 flex flex-col items-center relative overflow-hidden">
+                                        <span className="block text-[7px] font-bold text-zinc-500 uppercase tracking-widest leading-none mb-1">COMBO</span>
+                                        <span className="text-base font-black text-orange-400 italic font-mono">{liveStats.maxCombo}x</span>
+                                    </div>
+                                    <div className="p-2.5 rounded-2xl bg-white/5 border border-white/10 flex flex-col items-center relative overflow-hidden text-center">
+                                        <span className="block text-[7px] font-bold text-zinc-500 uppercase tracking-widest leading-none mb-1">BEST</span>
+                                        <span className="text-base font-black text-yellow-400 font-mono">
+                                            {Math.max(levelHighScores[level] || 0, liveStats.cleared * 100 + liveStats.maxCombo * 50 + (isPerfectClear ? 2500 : 0))}
+                                        </span>
+                                        {(liveStats.cleared * 100 + liveStats.maxCombo * 50 + (isPerfectClear ? 2500 : 0)) > (levelHighScores[level] || 0) && (
+                                            <div className="absolute top-0.5 right-0.5 px-0.5 py-0.5 rounded bg-cyan-500/20 text-cyan-400 font-black text-[5px] tracking-widest uppercase animate-pulse">
+                                                BEST
+                                            </div>
+                                        )}
                                     </div>
                                 </div>
 
@@ -1428,7 +1734,6 @@ export default function App() {
                                     </button>
                                 </div>
                             </div>
-                        )}
 
                     </div>
                 )}
@@ -1662,7 +1967,7 @@ export default function App() {
             </div>
 
             {/* Right Column: Dynamic Tactical Manual explaining elements */}
-            <div className="w-full max-w-[380px] space-y-4 select-none">
+            <div className="hidden md:block w-full max-w-[380px] space-y-4 select-none">
                 <div className="p-6 rounded-[36px] bg-[#0c0c0e] border border-zinc-800/80 shadow-xl flex flex-col relative overflow-hidden">
                     <div className="absolute top-0 right-0 w-24 h-24 bg-cyan-400/5 rounded-full blur-2xl pointer-events-none"></div>
                     <div className="absolute bottom-0 left-0 w-24 h-24 bg-fuchsia-500/5 rounded-full blur-2xl pointer-events-none"></div>

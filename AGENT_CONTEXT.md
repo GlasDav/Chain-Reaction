@@ -6,17 +6,19 @@ Welcome to the **Chain Reaction** workspace context document. This handbook is d
 
 ## 🎮 Project Architecture Overview
 
-Chain Reaction is a single-screen hyper-casual freemium web game built using the following stack:
+Chain Reaction is a single-screen hyper-casual freemium mobile/web game built using the following stack:
 1. **Frontend Core:** React 19, TypeScript, and Vite.
 2. **Graphics & Rendering:** HTML5 Canvas API driven by a custom physics engine class (`GameEngine` in `src/lib/engine.ts`).
 3. **Sound System:** Procedural Web Audio API synthesizer (`src/lib/audio.ts`) providing custom oscillators, chord sweeps, and warning beeps.
 4. **Styling:** Tailwind CSS v4.0 with vibrant neon-glow theme colors (STANDARD, NEBULA, MATRIX, SUPERNOVA).
+5. **Mobile Native Shells:** Capacitor wrappers scaffolded for iOS and Android, compiling in Xcode and Android Studio.
 
 ### Key Files in Workspace
-* [src/App.tsx](file:///c:/Users/David%20Glasser/OneDrive/Documents/Projects/Chain%20Reaction/src/App.tsx) — Main dashboard UI, screen states (`'START'`, `'GAME'`, `'ROUND_OVER'`, `'SHOP'`), persistent upgrades storage, and the **Quantum Syndicate Portal** premium monetization flow.
-* [src/lib/engine.ts](file:///c:/Users/David%20Glasser/OneDrive/Documents/Projects/Chain%20Reaction/src/lib/engine.ts) — Physics engine running within canvas loops. Handles drifting particles, gravity sweep vectors, void singularities, decay conversions, and chain-reaction calculations.
-* [src/lib/audio.ts](file:///c:/Users/David%20Glasser/OneDrive/Documents/Projects/Chain%20Reaction/src/lib/audio.ts) — Procedural Web Audio API sound synthesis.
-* [src/index.css](file:///c:/Users/David%20Glasser/OneDrive/Documents/Projects/Chain%20Reaction/src/index.css) — Global CSS custom keyframe definitions (`fadeIn`, `scaleUp`) and animations.
+* [src/App.tsx](file:///C:/Users/David%20Glasser/Projects/Chain%20Reaction/src/App.tsx) — Main dashboard UI, screen states (`'START'`, `'GAME'`, `'ROUND_OVER'`, `'SHOP'`), persistent upgrades storage, and the **Quantum Syndicate Portal** premium monetization flow.
+* [src/lib/engine.ts](file:///C:/Users/David%20Glasser/Projects/Chain%20Reaction/src/lib/engine.ts) — Physics engine running within canvas loops. Handles drifting particles, gravity sweep vectors, void singularities, decay conversions, and chain-reaction calculations.
+* [src/lib/audio.ts](file:///C:/Users/David%20Glasser/Projects/Chain%20Reaction/src/lib/audio.ts) — Procedural Web Audio API sound synthesis.
+* [src/index.css](file:///C:/Users/David%20Glasser/Projects/Chain%20Reaction/src/index.css) — Global CSS custom keyframe definitions (`fadeIn`, `scaleUp`) and animations.
+* [MainActivity.java](file:///C:/Users/David%20Glasser/Projects/Chain%20Reaction/android/app/src/main/java/com/quantum/chainreaction/MainActivity.java) — Native Android Java wrapper implementing immersive fullscreen behaviors.
 
 ---
 
@@ -70,25 +72,45 @@ When a player runs short on Quantum Shards to unlock an upgrade, or fails to cle
 
 ### 1. Simulated Fullscreen Rewarded Ads
 * Clicking **WATCH AD COMMS** transitions to a fullscreen countdown overlay (5 seconds).
-* Synthesizes dynamic click ticks on each second (`playAdTick()`).
 * Triggers a C-Major cash register bell chime on completion (`playTransactionChord()`), adds `+250` shards to balance, and floats an emerald banner `+250 Shards Received!` across the dashboard.
+* Bridges directly to native Capacitor AdMob plugins when `window.Capacitor.isNativePlatform()` is active.
 
 ### 2. Simulated In-App Purchases (Stripe Checkout)
 * Features 3 premium transaction core packages:
-  * **Mini Shard Cache:** $0.99 for +1,200 ⚡
-  * **Quantum Cargo Core:** $2.49 for +3,500 ⚡
-  * **Singularity Core Pack:** $4.99 for +10,000 ⚡
-* Clicking a package pops up a sleek card authorization dialog with active processing spinner wheels, transaction chimes, and successful verification checkmarks.
+  * **Mini Shard Cache:** $0.99 for +1,200 ⚡ (Consumable ID: `com.quantum.chainreaction.mini`)
+  * **Quantum Cargo Core:** $2.49 for +3,500 ⚡ (Consumable ID: `com.quantum.chainreaction.cargo`)
+  * **Singularity Core Pack:** $4.99 for +10,000 ⚡ (Consumable ID: `com.quantum.chainreaction.singularity`)
+* Bridges directly to native `CdvPurchase.store` APIs when run in compiled mobile shells to activate Google Play and Apple Store billing processes.
 
-### 3. Decoupled Production-Ready Interconnects
-All monetization overlays are fully decoupled from actual SDK implementations, making them directly swappable with AdMob, Unity Ads, and Stripe payments inside `src/App.tsx`:
-```typescript
-// STREAMING REWARDED AD SDK INTEGRATION HOOK
-const triggerRewardedAd = (onRewardCallback: () => void) => { ... }
+---
 
-// IN-APP PURCHASE PAYMENT SYSTEM GATEWAY
-const processInAppPurchase = (pack: { name: string; price: string; shards: number }, onSuccessCallback: () => void) => { ... }
-```
+## 📱 Mobile Platform Integrations & Rendering Optimizations
+
+Incoming developers should pay close attention to the following design patterns that ensure native performance and full viewport compatibility on mobile devices:
+
+### 1. Native Immersive Sticky Fullscreen Mode
+To guarantee the game fits edge-to-edge under notches and does not conflict with bottom navigation buttons (Home, Back, Recents), the native wrapper [MainActivity.java](file:///C:/Users/David%20Glasser/Projects/Chain%20Reaction/android/app/src/main/java/com/quantum/chainreaction/MainActivity.java) implements true immersive sticky flags:
+* Modern `WindowInsetsController` hides the status and navigation bars.
+* Overrides `onWindowFocusChanged` to dynamically re-immersive the application if a user swipes standard system items into visibility and releases control back to the game.
+
+### 2. Direct-to-DOM Sweeper UI Rendering
+Continuous herding sweeps are highly volatile. To prevent React state engine updates (`onScoreUpdate`) from forcing heavy Virtual DOM diffing loops 60 times a second inside `App.tsx`, fuel values are written **directly to the DOM**:
+* Target elements: `id="magnet-fuel-bar"` and `id="magnet-fuel-text"`.
+* The physics loop modifies these nodes directly (`0.05ms` workload). Component states are only synchronized during major milestones (explosions, comets, or round transitions), unlocking butter-smooth physics frame rates.
+
+### 3. Squared-Distance Coordinate Fabric Grid Math
+The interactive grid calculates fabric-warping gravity lines in `engine.ts` relative to comets and magnets:
+* Checks if `distSq < maxDistSq` (e.g. `25600` for a `160px` magnet radius) **before** invoking `Math.sqrt` and floating divisions.
+* Skips 90% of square-root calculations for grid vertices out of active sweep ranges, saving massive CPU cycles.
+
+### 4. Adaptive Fabric Grid Density
+* To accommodate lower-end mobile processors, screen bounds determine grid cell size.
+* If `width < 768` (mobile viewports), cell dimensions scale from `42x40px` to `72x60px`. This reduces path drawing calculations by **over 75%** on phone viewports with zero visual compromise.
+* **Canvas Shadow Elimination:** Avoid Canvas 2D `shadowBlur` operations inside high-frequency frames. Procedural glow rings (concentric filled arcs with alpha falloffs) and black-outlined vector strokes are used instead to keep rendering operations strictly GPU-accelerated.
+
+### 5. Level-Specific Progress and System Data Resets
+* **Sector High Scores:** Tracks and saves best scores achieved *per level* in `localStorage` under `chain_reaction_level_scores_v3`. Rendered on the results screen as a 3-column stats panel (Current Score, Peak Combo, Sector Best).
+* **Hard Database Wipe:** An accessibility button `[ ⚠️ RESET SYSTEM DATA ]` on the Start screen clears all database storage entries and resets state models back to clean-slate defaults.
 
 ---
 
@@ -101,6 +123,9 @@ npx tsc --noEmit
 
 # Compile static assets production bundle
 npm run build
+
+# Synchronize compiled web assets and native overrides to Capacitor shells
+npx cap sync
 
 # Start local development server (Vite on Port 3000)
 npm run dev

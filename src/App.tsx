@@ -26,6 +26,7 @@ import {
     Sparkles, 
     Check, 
     ChevronLeft, 
+    ChevronRight, 
     Flame, 
     Gauge,
     Dices,
@@ -194,8 +195,36 @@ export default function App() {
     const [shopReferrer, setShopReferrer] = useState<Screen>('START');
     const [showHelp, setShowHelp] = useState(false);
     
+    // Onboarding Tutorial state variables
+    const [tutorialCompleted, setTutorialCompleted] = useState<boolean>(() => {
+        try {
+            const saved = localStorage.getItem('chain_reaction_tutorial_completed_v3');
+            return saved === 'true';
+        } catch {
+            return false;
+        }
+    });
+
+    const [tutorialStep, setTutorialStep] = useState<number>(() => {
+        try {
+            const saved = localStorage.getItem('chain_reaction_tutorial_step_v3');
+            return saved ? parseInt(saved, 10) : 0;
+        } catch {
+            return 0;
+        }
+    });
+
     // Persistent stats
-    const [level, setLevel] = useState(1);
+    const [level, setLevel] = useState<number>(() => {
+        try {
+            const savedCompleted = localStorage.getItem('chain_reaction_tutorial_completed_v3');
+            if (savedCompleted !== 'true') return 0;
+            const saved = localStorage.getItem('chain_reaction_level_v3');
+            return saved ? parseInt(saved, 10) : 1;
+        } catch {
+            return 0;
+        }
+    });
     const [totalScore, setTotalScore] = useState(0);
     const [peakCombo, setPeakCombo] = useState(0);
     const [highScore, setHighScore] = useState(() => {
@@ -437,9 +466,32 @@ export default function App() {
 
     const handleScoreUpdate = (stats: GameStats) => {
         setLiveStats(stats);
+        
+        // Onboarding Tutorial step progression
+        if (level === 0 && !tutorialCompleted) {
+            if (tutorialStep === 0 && stats.tapped) {
+                setTutorialStep(1); // Advance to Step 2
+            }
+        }
     };
 
     const handleRoundEnd = (win: boolean, stats: GameStats) => {
+        if (level === 0) {
+            setDidWinLast(win);
+            setLiveStats(stats);
+            if (win) {
+                // Step 3: Success message after clearing. Award +200 shards!
+                setShards(prev => prev + 200);
+                setTutorialStep(2); // Set step to 2 (Step 3: success screen)
+                playPerfectBonus(); // Play positive feedback audio
+            } else {
+                // Reset to step 0 on loss to retry
+                setTutorialStep(0);
+            }
+            setScreen('ROUND_OVER');
+            return;
+        }
+
         setDidWinLast(win);
         setPeakCombo(prev => Math.max(prev, stats.maxCombo));
         
@@ -538,6 +590,30 @@ export default function App() {
             console.error(e);
         }
     }, [shards]);
+
+    useEffect(() => {
+        try {
+            localStorage.setItem('chain_reaction_level_v3', level.toString());
+        } catch (e) {
+            console.error(e);
+        }
+    }, [level]);
+
+    useEffect(() => {
+        try {
+            localStorage.setItem('chain_reaction_tutorial_completed_v3', tutorialCompleted ? 'true' : 'false');
+        } catch (e) {
+            console.error(e);
+        }
+    }, [tutorialCompleted]);
+
+    useEffect(() => {
+        try {
+            localStorage.setItem('chain_reaction_tutorial_step_v3', tutorialStep.toString());
+        } catch (e) {
+            console.error(e);
+        }
+    }, [tutorialStep]);
 
     useEffect(() => {
         try {
@@ -802,6 +878,21 @@ export default function App() {
             <div className="w-full max-w-[380px] h-[80vh] min-h-[640px] border-[12px] border-[#1a1a1e] rounded-[48px] overflow-hidden relative shadow-2xl bg-[#0c0c0e] flex flex-col">
                 <div className="h-6 w-32 bg-[#1a1a1e] absolute top-0 left-1/2 -translate-x-1/2 rounded-b-2xl z-50 pointer-events-none"></div>
                 
+                {/* ONBOARDING TUTORIAL GLASSMORPHIC BANNER */}
+                {screen === 'GAME' && level === 0 && !tutorialCompleted && (
+                    <div className="absolute top-24 left-4 right-4 z-50 p-4 rounded-2xl bg-[#0f1115]/90 border border-purple-500/40 backdrop-blur-md text-center shadow-[0_0_20px_rgba(168,85,247,0.3)] animate-scaleUp pointer-events-none">
+                        <div className="text-[10px] font-black text-purple-400 uppercase tracking-widest mb-1 font-mono">
+                            REACTOR TRAINING • SECTOR 0 (STEP {tutorialStep + 1}/2)
+                        </div>
+                        <p className="text-xs text-white font-bold leading-relaxed">
+                            {tutorialStep === 0 
+                                ? "Tap anywhere inside the reactor grid to drop a detonator spark and trigger a chain reaction!"
+                                : "Hold your mouse/finger on the grid to activate the Gravitational Magnet, herding atoms toward the active explosion!"
+                            }
+                        </p>
+                    </div>
+                )}
+
                 {/* START SCREEN */}
                 {screen === 'START' && (
                     <div className="absolute inset-0 flex flex-col items-center justify-center p-8 text-center z-10 bg-[#0c0c0e]/95 backdrop-blur-sm select-none">
@@ -822,16 +913,37 @@ export default function App() {
                                 START ENGINE
                             </button>
 
-                            <button 
-                                onClick={() => {
-                                    setShopReferrer('START');
-                                    setScreen('SHOP');
-                                }}
-                                className="w-full bg-gradient-to-r from-yellow-500 to-amber-500 text-black py-4 rounded-xl font-black text-base flex items-center justify-center gap-2 hover:scale-105 active:scale-95 transition-all shadow-[0_0_20px_rgba(245,158,11,0.25)] cursor-pointer"
-                            >
-                                <ShoppingBag className="w-5 h-5" />
-                                QUANTUM STORE [ {shards.toLocaleString()} ⚡ ]
-                            </button>
+                            {!tutorialCompleted && tutorialStep === 3 ? (
+                                <div className="relative w-full">
+                                    {/* Bouncing pointing finger above the button */}
+                                    <div className="absolute -top-12 left-1/2 -translate-x-1/2 z-50 flex flex-col items-center animate-bounce-finger pointer-events-none">
+                                        <span className="text-3xl filter drop-shadow-[0_0_8px_rgba(250,204,21,0.6)]">👇</span>
+                                        <span className="text-[10px] font-black text-yellow-400 bg-black/90 px-2 py-0.5 rounded-md border border-yellow-500/30 uppercase tracking-widest leading-none mt-1 font-mono shadow-[0_0_10px_rgba(250,204,21,0.3)]">RESEARCH UPGRADE</span>
+                                    </div>
+                                    <button 
+                                        onClick={() => {
+                                            setShopReferrer('START');
+                                            setTutorialStep(4); // Advance to Step 5 (Shop purchase)
+                                            setScreen('SHOP');
+                                        }}
+                                        className="w-full bg-gradient-to-r from-yellow-500 to-amber-500 text-black py-4 rounded-xl font-black text-base flex items-center justify-center gap-2 hover:scale-105 active:scale-95 transition-all shadow-[0_0_20px_rgba(245,158,11,0.25)] cursor-pointer animate-pulse-ring border-2 border-yellow-400"
+                                    >
+                                        <ShoppingBag className="w-5 h-5" />
+                                        QUANTUM STORE [ {shards.toLocaleString()} ⚡ ]
+                                    </button>
+                                </div>
+                            ) : (
+                                <button 
+                                    onClick={() => {
+                                        setShopReferrer('START');
+                                        setScreen('SHOP');
+                                    }}
+                                    className="w-full bg-gradient-to-r from-yellow-500 to-amber-500 text-black py-4 rounded-xl font-black text-base flex items-center justify-center gap-2 hover:scale-105 active:scale-95 transition-all shadow-[0_0_20px_rgba(245,158,11,0.25)] cursor-pointer"
+                                >
+                                    <ShoppingBag className="w-5 h-5" />
+                                    QUANTUM STORE [ {shards.toLocaleString()} ⚡ ]
+                                </button>
+                            )}
                             
                             <button 
                                 onClick={() => setShowHelp(!showHelp)}
@@ -882,7 +994,8 @@ export default function App() {
                         <div className="space-y-3 mb-6">
                             {SHOP_ITEMS.map((item) => {
                                 const currentLvl = upgrades[item.id] || 0;
-                                const cost = Math.round(item.baseCost * Math.pow(item.multiplier, currentLvl));
+                                const isTutorialGift = !tutorialCompleted && tutorialStep === 4 && item.id === 'sparkRadiusBoost';
+                                const cost = isTutorialGift ? 0 : Math.round(item.baseCost * Math.pow(item.multiplier, currentLvl));
                                 const currentLvlLabel = item.getValueLabel(currentLvl);
 
                                 const isMaxed = 
@@ -903,7 +1016,14 @@ export default function App() {
                                      item.id === 'comboShardMultiplier' ? Coins : Cpu; 
 
                                 return (
-                                    <div key={item.id} className="p-3.5 rounded-2xl bg-white/5 border border-white/5 flex flex-col gap-2">
+                                    <div 
+                                        key={item.id} 
+                                        className={`p-3.5 rounded-2xl bg-white/5 border flex flex-col gap-2 transition-all relative ${
+                                            isTutorialGift 
+                                                ? 'border-purple-500/80 bg-purple-950/20 shadow-[0_0_20px_rgba(168,85,247,0.25)] ring-2 ring-purple-500/50' 
+                                                : 'border-white/5'
+                                        }`}
+                                    >
                                         <div className="flex items-start justify-between gap-2">
                                             <div className="flex items-center gap-3">
                                                 <div className="p-1.5 rounded-lg bg-zinc-800 text-cyan-400 border border-zinc-700 flex-shrink-0">
@@ -929,32 +1049,54 @@ export default function App() {
                                                     MAX LEVEL
                                                 </span>
                                             ) : (
-                                                <button
-                                                    onClick={() => {
-                                                        if (shards >= cost) {
-                                                            setShards(s => s - cost);
-                                                            setUpgrades(prev => ({
-                                                                ...prev,
-                                                                [item.id]: currentLvl + 1
-                                                            }));
-                                                            playPurchaseSound();
-                                                            addFloatNotif(`Purchased ${item.name} Tier ${currentLvl + 1}!`);
-                                                        } else {
-                                                            setMonetizationReason({
-                                                                item: `${item.name} Tier ${currentLvl + 1}`,
-                                                                shortage: cost - shards
-                                                            });
-                                                            setMonetizationOpen(true);
-                                                        }
-                                                    }}
-                                                    className={`px-3 py-1.5 rounded-lg text-[9px] font-black tracking-wider uppercase transition-all flex items-center gap-1 cursor-pointer ${
-                                                        shards >= cost
-                                                            ? 'bg-yellow-400 text-black shadow-[0_0_10px_rgba(250,204,21,0.2)] hover:scale-105 active:scale-95 font-bold'
-                                                            : 'bg-zinc-800 border border-zinc-700 text-zinc-400 hover:bg-zinc-755 hover:text-yellow-400 hover:scale-105 active:scale-95 shadow-[0_0_10px_rgba(250,204,21,0.05)]'
-                                                    }`}
-                                                >
-                                                    {cost} ⚡
-                                                </button>
+                                                <div className="flex items-center gap-2">
+                                                    {isTutorialGift && (
+                                                        <div className="flex items-center gap-1.5 animate-bounce-finger-left">
+                                                            <span className="text-xl">👉</span>
+                                                        </div>
+                                                    )}
+                                                    <button
+                                                        onClick={() => {
+                                                            if (isTutorialGift) {
+                                                                setUpgrades(prev => ({
+                                                                    ...prev,
+                                                                    sparkRadiusBoost: 1
+                                                                }));
+                                                                setTutorialCompleted(true);
+                                                                setTutorialStep(5);
+                                                                setLevel(1);
+                                                                playPurchaseSound();
+                                                                addFloatNotif("Catalyst Core Active! Reactor Initialized!");
+                                                                setScreen('START');
+                                                                return;
+                                                            }
+                                                            if (shards >= cost) {
+                                                                setShards(s => s - cost);
+                                                                setUpgrades(prev => ({
+                                                                    ...prev,
+                                                                    [item.id]: currentLvl + 1
+                                                                }));
+                                                                playPurchaseSound();
+                                                                addFloatNotif(`Purchased ${item.name} Tier ${currentLvl + 1}!`);
+                                                            } else {
+                                                                setMonetizationReason({
+                                                                    item: `${item.name} Tier ${currentLvl + 1}`,
+                                                                    shortage: cost - shards
+                                                                });
+                                                                setMonetizationOpen(true);
+                                                            }
+                                                        }}
+                                                        className={`px-3 py-1.5 rounded-lg text-[9px] font-black tracking-wider uppercase transition-all flex items-center gap-1 cursor-pointer ${
+                                                            isTutorialGift
+                                                                ? 'bg-gradient-to-r from-purple-500 to-fuchsia-500 text-white shadow-[0_0_15px_rgba(168,85,247,0.5)] border border-purple-400 hover:scale-105 active:scale-95 font-bold animate-pulse-ring'
+                                                                : shards >= cost
+                                                                    ? 'bg-yellow-400 text-black shadow-[0_0_10px_rgba(250,204,21,0.2)] hover:scale-105 active:scale-95 font-bold'
+                                                                    : 'bg-zinc-800 border border-zinc-700 text-zinc-400 hover:bg-zinc-755 hover:text-yellow-400 hover:scale-105 active:scale-95 shadow-[0_0_10px_rgba(250,204,21,0.05)]'
+                                                        }`}
+                                                    >
+                                                        {isTutorialGift ? '🎁 FREE GIFT' : `${cost} ⚡`}
+                                                    </button>
+                                                </div>
                                             )}
                                         </div>
                                     </div>
@@ -1135,7 +1277,58 @@ export default function App() {
                 {screen === 'ROUND_OVER' && liveStats && (
                     <div className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center z-40 bg-[#0c0c0e]/95 backdrop-blur-lg select-none overflow-y-auto">
                         
-                        {isNearMissScreen ? (
+                        {/* Sector 0 Onboarding Tutorial Success/Failure Overlays */}
+                        {level === 0 && !tutorialCompleted ? (
+                            didWinLast && tutorialStep === 2 ? (
+                                <div className="w-full flex flex-col items-center">
+                                    <div className="mb-4 inline-flex items-center justify-center p-4 bg-purple-950/40 border border-purple-500/50 rounded-full animate-bounce shadow-[0_0_20px_rgba(168,85,247,0.3)]">
+                                        <Sparkles className="w-10 h-10 text-purple-400 fill-purple-400 animate-pulse" />
+                                    </div>
+                                    <div className="mb-2 inline-flex items-center gap-1.5 px-3 py-1 bg-purple-500/10 border border-purple-500/30 rounded-full text-purple-400 font-extrabold text-[10px] uppercase tracking-widest animate-pulse">
+                                        🏆 LEVEL 0 COMPLETED 🏆
+                                    </div>
+                                    <h2 className="text-3xl font-black italic tracking-tighter uppercase leading-none mb-2 text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-fuchsia-400 drop-shadow-[0_0_15px_rgba(168,85,247,0.4)]">
+                                        REACTOR STABILIZED!
+                                    </h2>
+                                    <p className="text-zinc-400 text-xs font-bold leading-relaxed max-w-[270px] mb-6">
+                                        Excellent work! You trigger-sparked a perfect sequence cascade and successfully herded all particles using the magnetic sweep core.
+                                    </p>
+                                    <div className="w-full p-4 mb-8 bg-purple-500/5 border border-purple-500/20 rounded-2xl">
+                                        <span className="block text-[8px] font-black text-purple-400 uppercase tracking-widest mb-1">HARVEST BONUS AWARDED</span>
+                                        <span className="text-2xl font-black text-yellow-400 font-mono flex items-center justify-center gap-1">
+                                            +200 SHARDS ⚡
+                                        </span>
+                                    </div>
+                                    <button 
+                                        onClick={() => {
+                                            setTutorialStep(3); // Advance to Step 4 (Shop pointer)
+                                            setScreen('START');
+                                        }}
+                                        className="w-full bg-gradient-to-r from-purple-500 to-fuchsia-500 text-white py-4 rounded-xl font-black text-base flex items-center justify-center gap-2 hover:scale-105 active:scale-95 transition-all shadow-[0_0_20px_rgba(168,85,247,0.3)] cursor-pointer"
+                                    >
+                                        PROCEED TO RESEARCH LABS <ChevronRight className="w-5 h-5 animate-pulse" />
+                                    </button>
+                                </div>
+                            ) : (
+                                <div className="w-full flex flex-col items-center">
+                                    <div className="mb-4 inline-flex items-center justify-center p-3 rounded-full bg-rose-950/40 border border-rose-500/30 text-rose-455">
+                                        <RotateCcw className="w-8 h-8 text-rose-400" />
+                                    </div>
+                                    <h2 className="text-3xl font-black italic tracking-tighter uppercase leading-none mb-2 text-rose-500 drop-shadow-[0_0_15px_rgba(244,63,94,0.4)]">
+                                        SEQUENCE CRITICAL FAULT!
+                                    </h2>
+                                    <p className="text-zinc-400 text-xs font-bold leading-relaxed max-w-[270px] mb-8">
+                                        The chain reaction fizzled out before all atoms were neutralized. Let's try again! Remember, drop the detonator spark right in the middle of a dense group of atoms.
+                                    </p>
+                                    <button 
+                                        onClick={startGame}
+                                        className="w-full bg-white text-black py-4 rounded-xl font-black text-base flex items-center justify-center gap-2 hover:scale-105 active:scale-95 transition-all shadow-[0_0_20px_rgba(255,255,255,0.15)] cursor-pointer"
+                                    >
+                                        <RotateCcw className="w-5 h-5 text-black" /> RE-ENGAGE SEQUENCE
+                                    </button>
+                                </div>
+                            )
+                        ) : isNearMissScreen ? (
                             /* HIGH ALERT NEAR-MISS POPUP OVERLAY */
                             <div className="w-full flex flex-col items-center">
                                 <div className="mb-2 mt-4 inline-flex items-center justify-center p-4 bg-red-950/40 border border-red-500/50 rounded-full animate-bounce">

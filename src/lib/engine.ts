@@ -205,12 +205,12 @@ export class GameEngine {
         if (activeTheme) this.activeTheme = activeTheme;
 
         const extraSparksLvl = this.upgrades.extraSparks || 0;
-        this.sparksTotal = Math.min(8, 1 + extraSparksLvl);
+        this.sparksTotal = level === 0 ? 1 : Math.min(8, 1 + extraSparksLvl);
         this.sparksLeft = this.sparksTotal;
 
         // Strict 100% Target to pass
         this.targetPct = 100;
-        this.totalDrifting = 28 + level * 5; // Slightly fewer particles per level since 100% is required, keeping it balanced but challenging!
+        this.totalDrifting = level === 0 ? 12 : (28 + level * 5); // Slightly fewer particles per level since 100% is required, keeping it balanced but challenging!
         this.cleared = 0;
         this.combo = 0;
         this.maxCombo = 0;
@@ -238,11 +238,11 @@ export class GameEngine {
 
         // DIFFICULTY UPGRADES: Scaling up velocity vectors and shrinking hitbox radius at higher levels
         // For levels >= 5, speed increases exponentially and radius shrinks exponentially.
-        const baseSpeedScale = 1.45 + Math.min(2.4, (level - 1) * 0.22);
-        const speedScale = baseSpeedScale * Math.pow(1.18, Math.max(0, level - 5));
+        const baseSpeedScale = level === 0 ? 0.75 : (1.45 + Math.min(2.4, (level - 1) * 0.22));
+        const speedScale = level === 0 ? 0.75 : baseSpeedScale * Math.pow(1.18, Math.max(0, level - 5));
         
-        const baseRadiusScale = Math.max(0.65, 1.0 - (level - 1) * 0.04);
-        const radiusScale = Math.max(0.25, baseRadiusScale * Math.pow(0.88, Math.max(0, level - 5)));
+        const baseRadiusScale = level === 0 ? 1.0 : Math.max(0.65, 1.0 - (level - 1) * 0.04);
+        const radiusScale = level === 0 ? 1.0 : Math.max(0.25, baseRadiusScale * Math.pow(0.88, Math.max(0, level - 5)));
 
         const activeThemeName = this.activeTheme || 'STANDARD';
         const currentThemeColors = THEME_COLORS[activeThemeName] || THEME_COLORS.STANDARD;
@@ -254,10 +254,12 @@ export class GameEngine {
             const specialFreq = Math.min(0.65, 0.15 + specialRateLvl * 0.05);
             const randType = Math.random();
             let pType: ParticleType = 'STANDARD';
-            if (randType < specialFreq) {
-                pType = 'GRAVITY';
-            } else if (randType < specialFreq * 2) {
-                pType = 'SPLITTER';
+            if (level > 0) {
+                if (randType < specialFreq) {
+                    pType = 'GRAVITY';
+                } else if (randType < specialFreq * 2) {
+                    pType = 'SPLITTER';
+                }
             }
 
             const selectionColors = currentThemeColors[pType as Exclude<ParticleType, 'VOID_ANOMALY'>] || THEME_COLORS.STANDARD[pType as Exclude<ParticleType, 'VOID_ANOMALY'>];
@@ -510,7 +512,9 @@ export class GameEngine {
 
         // 1. Update actively herded magnets
         if (this.magnetActive && this.magnetFuel > 0) {
-            this.magnetFuel -= 0.55; // Slower burn to give ample planning
+            if (this.level > 0) {
+                this.magnetFuel -= 0.55; // Slower burn to give ample planning
+            }
             if (this.magnetFuel <= 0) {
                 this.magnetActive = false;
             }
@@ -1206,6 +1210,38 @@ export class GameEngine {
             ctx.lineWidth = 3;
             ctx.strokeText(t.text, t.x, t.y);
             ctx.fillText(t.text, t.x, t.y);
+            ctx.restore();
+        }
+
+        // Onboarding Tutorial Center Pulsing Ring guide
+        if (this.level === 0 && !this.tapped) {
+            ctx.save();
+            ctx.globalCompositeOperation = 'screen';
+            const cx = this.width / 2;
+            const cy = this.height / 2;
+            const pulseRadius = 35 + Math.sin(this.orbitAngle * 4) * 8;
+            
+            // Outer pulsing ring
+            ctx.beginPath();
+            ctx.arc(cx, cy, pulseRadius, 0, Math.PI * 2);
+            ctx.strokeStyle = 'rgba(168, 85, 247, 0.7)';
+            ctx.lineWidth = 3;
+            ctx.stroke();
+
+            // Inner glowing core
+            ctx.beginPath();
+            ctx.arc(cx, cy, 6, 0, Math.PI * 2);
+            ctx.fillStyle = '#c084fc';
+            ctx.shadowBlur = 10;
+            ctx.shadowColor = '#a855f7';
+            ctx.fill();
+
+            // Connecting orbital rings
+            ctx.beginPath();
+            ctx.arc(cx, cy, 18, 0, Math.PI * 2);
+            ctx.strokeStyle = 'rgba(168, 85, 247, 0.25)';
+            ctx.setLineDash([4, 4]);
+            ctx.stroke();
             ctx.restore();
         }
 

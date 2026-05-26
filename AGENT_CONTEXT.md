@@ -115,6 +115,24 @@ The interactive grid calculates fabric-warping gravity lines in `engine.ts` rela
 
 ---
 
+## 📦 Store Compliance & Publishing Assets
+
+To meet Google Play Console requirements, legal policies and high-fidelity promotional graphic assets are established directly in the workspace:
+
+### 1. GitHub Pages Privacy Policy
+* **File:** [privacy.html](file:///C:/Users/David%20Glasser/Projects/Chain%20Reaction/privacy.html)
+* **Status:** Deployed and live via GitHub Pages.
+* **Publishing URL:** `https://glasdav.github.io/Chain-Reaction/privacy.html`
+* **Contents:** Standard, legally compliant mobile privacy agreement detailing data practices (zero user-identifiable tracking, local device storage only) and integrated third-party SDK connections (Google Play Services, AdMob).
+
+### 2. Store Graphic Assets (`/icons` directory)
+Google-spec visual assets are generated and cropped directly inside the workspace for simple submission:
+* **Play Store App Icon:** [play_store_512.png](file:///C:/Users/David%20Glasser/Projects/Chain%20Reaction/icons/play_store_512.png) — Exactly **512px by 512px PNG** displaying the high-contrast neon atom core with glowing orbital trails.
+* **Store Feature Graphic 1:** [feature_graphic_1.png](file:///C:/Users/David%20Glasser/Projects/Chain%20Reaction/icons/feature_graphic_1.png) — Exactly **1024px by 500px PNG** featuring a panoramic "Instability Cascade Core" chain-reaction layout.
+* **Store Feature Graphic 2:** [feature_graphic_2.png](file:///C:/Users/David%20Glasser/Projects/Chain%20Reaction/icons/feature_graphic_2.png) — Exactly **1024px by 500px PNG** displaying a wide "Quantum HUD Scanner Sweep" reactor grid layout.
+
+---
+
 ## 🚦 Verification Commands
 
 To check the project compile states or verify static assets, execute the following shell scripts from the root directory:

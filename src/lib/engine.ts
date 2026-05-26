@@ -1,7 +1,7 @@
-import { playDetonate } from './audio';
+import { playDetonate, playAlertBeep } from './audio';
 
 export type ParticleState = 'DRIFTING' | 'EXPANDING' | 'FROZEN' | 'SHRINKING' | 'DEAD';
-export type ParticleType = 'STANDARD' | 'GRAVITY' | 'SPLITTER' | 'DECAY' | 'VOID_ANOMALY';
+export type ParticleType = 'STANDARD' | 'GRAVITY' | 'SPLITTER' | 'DECAY' | 'VOID_ANOMALY' | 'DAMPENER' | 'SINKHOLE';
 export type ParticleTheme = 'STANDARD' | 'NEBULA' | 'MATRIX' | 'SUPERNOVA';
 
 export interface StoreUpgrades {
@@ -16,6 +16,13 @@ export interface StoreUpgrades {
     magnetAutopilot?: number; // lvl 0, 1, 2, 3
 }
 
+export interface PrestigeUpgrades {
+    catalystCore: number;
+    tractorPulsar: number;
+    gridEfficiency: number;
+    darkMatterConversion: number;
+}
+
 export interface Particle {
     x: number;
     y: number;
@@ -27,6 +34,7 @@ export interface Particle {
     state: ParticleState;
     type: ParticleType;
     timer: number;
+    isDarkMatter?: boolean;
 }
 
 export interface Debris {
@@ -57,7 +65,7 @@ export interface SplitterSpark {
 }
 
 // Highly vibrant theme color variations: Standard, Nebula, Matrix, Supernova
-export const THEME_COLORS: Record<ParticleTheme, Record<Exclude<ParticleType, 'VOID_ANOMALY'>, string[]>> = {
+export const THEME_COLORS: Record<ParticleTheme, Record<Exclude<ParticleType, 'VOID_ANOMALY' | 'DAMPENER' | 'SINKHOLE'>, string[]>> = {
     STANDARD: {
         STANDARD: ['#22d3ee', '#fb7185', '#a3e635'],
         GRAVITY: ['#e879f9'],
@@ -100,6 +108,7 @@ export interface GameStats {
     tapped: boolean;
     sparksTotal: number;
     sparksLeft: number;
+    darkMatterCleared?: number;
 }
 
 export class GameEngine {
@@ -123,9 +132,11 @@ export class GameEngine {
 
     // Upgrades modifiers
     upgrades: StoreUpgrades = { extraSparks: 0, maxMagnetFuel: 0, magnetPower: 0, sparkRadiusBoost: 0, specialSpawnRate: 0 };
+    prestigeUpgrades: PrestigeUpgrades = { catalystCore: 0, tractorPulsar: 0, gridEfficiency: 0, darkMatterConversion: 0 };
     activeTheme: ParticleTheme = 'STANDARD';
     sparksTotal: number = 1;
     sparksLeft: number = 1;
+    darkMatterCleared: number = 0;
 
     // Herding Magnet Mechanics
     magnetX: number = 0;
@@ -195,24 +206,27 @@ export class GameEngine {
             maxMagnetFuel: Math.max(10, Math.floor(this.maxMagnetFuel)),
             tapped: this.tapped,
             sparksTotal: this.sparksTotal,
-            sparksLeft: this.sparksLeft
+            sparksLeft: this.sparksLeft,
+            darkMatterCleared: this.darkMatterCleared
         };
     }
 
-    startLevel(level: number, upgrades?: StoreUpgrades, activeTheme?: ParticleTheme) {
+    startLevel(level: number, upgrades?: StoreUpgrades, activeTheme?: ParticleTheme, prestigeUpgrades?: PrestigeUpgrades) {
         cancelAnimationFrame(this.reqId);
         this.level = level;
         if (upgrades) this.upgrades = upgrades;
         if (activeTheme) this.activeTheme = activeTheme;
+        if (prestigeUpgrades) this.prestigeUpgrades = prestigeUpgrades;
 
         const extraSparksLvl = this.upgrades.extraSparks || 0;
-        this.sparksTotal = Math.min(8, 1 + extraSparksLvl);
+        this.sparksTotal = level === 0 ? 1 : Math.min(8, 1 + extraSparksLvl);
         this.sparksLeft = this.sparksTotal;
 
         // Strict 100% Target to pass
         this.targetPct = 100;
-        this.totalDrifting = 28 + level * 5; // Slightly fewer particles per level since 100% is required, keeping it balanced but challenging!
+        this.totalDrifting = level === 0 ? 12 : (28 + level * 5); // Slightly fewer particles per level since 100% is required, keeping it balanced but challenging!
         this.cleared = 0;
+        this.darkMatterCleared = 0;
         this.combo = 0;
         this.maxCombo = 0;
         this.tapped = false;
@@ -239,11 +253,11 @@ export class GameEngine {
 
         // DIFFICULTY UPGRADES: Scaling up velocity vectors and shrinking hitbox radius at higher levels
         // For levels >= 5, speed increases exponentially and radius shrinks exponentially.
-        const baseSpeedScale = 1.45 + Math.min(2.4, (level - 1) * 0.22);
-        const speedScale = baseSpeedScale * Math.pow(1.18, Math.max(0, level - 5));
+        const baseSpeedScale = level === 0 ? 0.75 : (1.45 + Math.min(2.4, (level - 1) * 0.22));
+        const speedScale = level === 0 ? 0.75 : baseSpeedScale * Math.pow(1.18, Math.max(0, level - 5));
         
-        const baseRadiusScale = Math.max(0.65, 1.0 - (level - 1) * 0.04);
-        const radiusScale = Math.max(0.25, baseRadiusScale * Math.pow(0.88, Math.max(0, level - 5)));
+        const baseRadiusScale = level === 0 ? 1.0 : Math.max(0.65, 1.0 - (level - 1) * 0.04);
+        const radiusScale = level === 0 ? 1.0 : Math.max(0.25, baseRadiusScale * Math.pow(0.88, Math.max(0, level - 5)));
 
         const activeThemeName = this.activeTheme || 'STANDARD';
         const currentThemeColors = THEME_COLORS[activeThemeName] || THEME_COLORS.STANDARD;
@@ -255,14 +269,20 @@ export class GameEngine {
             const specialFreq = Math.min(0.65, 0.15 + specialRateLvl * 0.05);
             const randType = Math.random();
             let pType: ParticleType = 'STANDARD';
-            if (randType < specialFreq) {
-                pType = 'GRAVITY';
-            } else if (randType < specialFreq * 2) {
-                pType = 'SPLITTER';
+            if (level > 0) {
+                if (randType < specialFreq) {
+                    pType = 'GRAVITY';
+                } else if (randType < specialFreq * 2) {
+                    pType = 'SPLITTER';
+                }
             }
 
-            const selectionColors = currentThemeColors[pType as Exclude<ParticleType, 'VOID_ANOMALY'>] || THEME_COLORS.STANDARD[pType as Exclude<ParticleType, 'VOID_ANOMALY'>];
+            const selectionColors = currentThemeColors[pType as Exclude<ParticleType, 'VOID_ANOMALY' | 'DAMPENER' | 'SINKHOLE'>] || THEME_COLORS.STANDARD[pType as Exclude<ParticleType, 'VOID_ANOMALY' | 'DAMPENER' | 'SINKHOLE'>];
             const chosenColor = selectionColors[Math.floor(Math.random() * selectionColors.length)];
+
+            const isDarkMatterChance = (this.prestigeUpgrades.darkMatterConversion || 0) * 0.10;
+            const isDarkMatter = pType === 'STANDARD' && Math.random() < isDarkMatterChance;
+            const finalColor = isDarkMatter ? (Math.random() < 0.5 ? '#d946ef' : '#a855f7') : chosenColor;
 
             this.particles.push({
                 x: Math.random() * (this.width - 40) + 20,
@@ -273,10 +293,11 @@ export class GameEngine {
                 maxRadius: pType === 'STANDARD' 
                     ? (20 + Math.random() * 6) // reduced from 32-42px to 20-26px for tighter gameplay
                     : pType === 'GRAVITY' ? 34 : 28, // reduced from 52/42px to 34/28px
-                color: chosenColor,
+                color: finalColor,
                 state: 'DRIFTING',
                 type: pType,
-                timer: 0
+                timer: 0,
+                isDarkMatter
             });
         }
 
@@ -315,6 +336,40 @@ export class GameEngine {
                 timer: 0
             });
         }
+
+        // 4. Spawn Resonance Dampeners at level 35+ (2 to 3 dampeners)
+        const dampenerCount = level < 35 ? 0 : Math.min(3, 2 + Math.floor((level - 35) / 5));
+        for (let i = 0; i < dampenerCount; i++) {
+            this.particles.push({
+                x: Math.random() * (this.width - 80) + 40,
+                y: Math.random() * (this.height - 80) + 40,
+                vx: (Math.random() - 0.5) * speedScale * 0.3,
+                vy: (Math.random() - 0.5) * speedScale * 0.3,
+                radius: 10.0 * radiusScale,
+                maxRadius: 0,
+                color: '#d946ef',
+                state: 'DRIFTING',
+                type: 'DAMPENER',
+                timer: 0
+            });
+        }
+
+        // 5. Spawn Gravity Sinkholes at level 35+ (2 to 3 sinkholes)
+        const sinkholeCount = level < 35 ? 0 : Math.min(3, 2 + Math.floor((level - 35) / 5));
+        for (let i = 0; i < sinkholeCount; i++) {
+            this.particles.push({
+                x: Math.random() * (this.width - 100) + 50,
+                y: Math.random() * (this.height - 100) + 50,
+                vx: (Math.random() - 0.5) * speedScale * 0.2,
+                vy: (Math.random() - 0.5) * speedScale * 0.2,
+                radius: 14.0 * radiusScale,
+                maxRadius: 0,
+                color: '#a855f7',
+                state: 'DRIFTING',
+                type: 'SINKHOLE',
+                timer: 0
+            });
+        }
         
         this.started = true;
         this.onScoreUpdate(this.getStats());
@@ -349,10 +404,51 @@ export class GameEngine {
             this.magnetActive = false; 
         }
 
-        // Apply spark radius boost upgrade (asymptotic soft-cap: 1.0 + 1.8 * (1 - 0.78^L))
+        // Check if within 65px of a Sinkhole
+        let swallowed = false;
+        for (let p of this.particles) {
+            if (p.type === 'SINKHOLE' && p.state === 'DRIFTING') {
+                const dx = x - p.x;
+                const dy = y - p.y;
+                if (dx*dx + dy*dy < 65 * 65) {
+                    swallowed = true;
+                    playAlertBeep();
+                    
+                    this.texts.push({
+                        x,
+                        y: y - 15,
+                        text: "💥 SPARK SWALLOWED!",
+                        life: 1.5,
+                        color: "#a855f7"
+                    });
+                    
+                    for (let i = 0; i < 10; i++) {
+                        const angle = Math.random() * Math.PI * 2;
+                        const speed = 1.0 + Math.random() * 3.5;
+                        this.debris.push({
+                            x, y,
+                            vx: Math.cos(angle) * speed,
+                            vy: Math.sin(angle) * speed,
+                            life: 1.0,
+                            color: "#a855f7"
+                        });
+                    }
+                    break;
+                }
+            }
+        }
+
+        if (swallowed) {
+            this.onScoreUpdate(this.getStats());
+            return;
+        }
+
+        // Apply spark radius boost upgrade + prestige Catalyst Core multiplier (+15% per level)
         const radiusBoostLvl = this.upgrades.sparkRadiusBoost || 0;
+        const prestigeCatalystCoreLvl = this.prestigeUpgrades.catalystCore || 0;
         const sparkRadiusBoost = 1.0 + 1.8 * (1 - Math.pow(0.78, radiusBoostLvl));
-        const maxRadiusWithUpgrade = 36 * sparkRadiusBoost; // reduced starting from 55 to 36
+        const prestigeRadiusMult = 1.0 + 0.15 * prestigeCatalystCoreLvl;
+        const maxRadiusWithUpgrade = 36 * sparkRadiusBoost * prestigeRadiusMult;
         
         // Spawn trigger spark
         this.particles.push({
@@ -512,7 +608,9 @@ export class GameEngine {
 
         // 1. Update actively herded magnets
         if (this.magnetActive && this.magnetFuel > 0) {
-            this.magnetFuel = Math.max(0, this.magnetFuel - 0.55); // Slower burn to give ample planning
+            if (this.level > 0) {
+                this.magnetFuel = Math.max(0, this.magnetFuel - 0.55); // Slower burn to give ample planning
+            }
             if (this.magnetFuel <= 0) {
                 this.magnetActive = false;
                 this.onScoreUpdate(this.getStats()); // Trigger once when fully depleted
@@ -536,7 +634,8 @@ export class GameEngine {
                 // Force falls off linearly after 180px, but strong inside it 
                 if (dist < 185) {
                     const powerLvl = this.upgrades.magnetPower || 0;
-                    const pullMultiplier = 1.0 + 3.0 * (1 - Math.pow(0.80, powerLvl));
+                    const prestigeTractorLvl = this.prestigeUpgrades.tractorPulsar || 0;
+                    const pullMultiplier = (1.0 + 3.0 * (1 - Math.pow(0.80, powerLvl))) * (1.0 + 0.20 * prestigeTractorLvl);
                     // Decay particles are heavy anti-matter, matching 30% magnet strength
                     const baseForce = p.type === 'DECAY' ? 0.06 : 0.22;
                     const power = (1 - dist / 185) * baseForce * pullMultiplier;
@@ -600,6 +699,47 @@ export class GameEngine {
                         const pullForce = (1 - dist / 160) * baseGravity;
                         other.vx += (dx / dist) * pullForce;
                         other.vy += (dy / dist) * pullForce;
+                    }
+                }
+            }
+        }
+
+        // Strong gravity pull from Sinkholes to standard drifting atoms
+        for (let sp of this.particles) {
+            if (sp.type === 'SINKHOLE' && sp.state === 'DRIFTING') {
+                for (let other of this.particles) {
+                    if (other === sp || other.state !== 'DRIFTING' || other.type !== 'STANDARD') continue;
+                    const dx = sp.x - other.x;
+                    const dy = sp.y - other.y;
+                    const distSq = dx*dx + dy*dy;
+                    if (distSq < 185 * 185) {
+                        const dist = Math.sqrt(distSq || 1);
+                        const pullMultiplier = 3.5 * (1.0 + 3.0 * (1 - Math.pow(0.80, this.upgrades.magnetPower || 0)));
+                        const baseForce = 0.22;
+                        const power = (1 - dist / 185) * baseForce * pullMultiplier;
+                        other.vx += (dx / dist) * power;
+                        other.vy += (dy / dist) * power;
+                    }
+                }
+            }
+        }
+
+        // Dampener collapse active explosions inside 85px radius
+        const activeExplosions = this.particles.filter(p => 
+            p.state === 'EXPANDING' || p.state === 'FROZEN' || p.state === 'SHRINKING'
+        );
+        for (let dp of this.particles) {
+            if (dp.type === 'DAMPENER' && dp.state === 'DRIFTING') {
+                for (let exp of activeExplosions) {
+                    const dx = exp.x - dp.x;
+                    const dy = exp.y - dp.y;
+                    if (dx*dx + dy*dy < 85 * 85) {
+                        if (exp.state !== 'SHRINKING') {
+                            exp.state = 'SHRINKING';
+                            exp.timer = 0;
+                            exp.radius = Math.max(1.0, exp.maxRadius * 0.15);
+                            this.spawnDecayAbsorbJuice(dp);
+                        }
                     }
                 }
             }
@@ -681,6 +821,12 @@ export class GameEngine {
                 const dx = p.x - s.x;
                 const dy = p.y - s.y;
                 if (dx*dx + dy*dy < (p.radius + 12) * (p.radius + 12)) {
+                    if (p.type === 'DAMPENER' || p.type === 'SINKHOLE') {
+                        s.life = 0; // swallow spark
+                        this.spawnDecayAbsorbJuice(p);
+                        didClearViaSpark = true;
+                        break;
+                    }
                     if (p.type === 'DECAY') {
                         const decayResistLvl = this.upgrades.decayResist || 0;
                         const bypassChance = Math.min(1.0, 0.125 * decayResistLvl);
@@ -729,6 +875,9 @@ export class GameEngine {
                     p.radius = 4;
                     
                     this.cleared++;
+                    if (p.isDarkMatter) {
+                        this.darkMatterCleared++;
+                    }
                     this.combo++;
                     this.maxCombo = Math.max(this.combo, this.maxCombo);
 
@@ -753,6 +902,7 @@ export class GameEngine {
         let didClear = false;
         for (let p1 of this.particles) {
             if (p1.state !== 'DRIFTING') continue;
+            if (p1.type === 'DAMPENER' || p1.type === 'SINKHOLE') continue; // Hazards cannot explode
             
             for (let exp of explosives) {
                 const dx = p1.x - exp.x;
@@ -836,6 +986,9 @@ export class GameEngine {
                     p1.radius = 4; 
                     
                     this.cleared++;
+                    if (p1.isDarkMatter) {
+                        this.darkMatterCleared++;
+                    }
                     this.combo++;
                     this.maxCombo = Math.max(this.combo, this.maxCombo);
                     
@@ -1090,6 +1243,73 @@ export class GameEngine {
                 continue;
             }
 
+            // Render Dampener
+            if (p.type === 'DAMPENER') {
+                // Translucent pulsing magenta boundary circle
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, 85, 0, Math.PI * 2);
+                ctx.strokeStyle = `rgba(217, 70, 239, ${0.08 + Math.sin(this.orbitAngle * 4.0) * 0.04})`;
+                ctx.lineWidth = 1.5;
+                ctx.stroke();
+
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+                ctx.fillStyle = '#d946ef';
+                ctx.fill();
+
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.radius * 0.4, 0, Math.PI * 2);
+                ctx.fillStyle = '#ffffff';
+                ctx.fill();
+
+                ctx.restore();
+                continue;
+            }
+
+            // Render Sinkhole
+            if (p.type === 'SINKHOLE') {
+                ctx.save();
+                ctx.translate(p.x, p.y);
+                ctx.rotate(-this.orbitAngle * 2.0);
+
+                ctx.beginPath();
+                ctx.arc(0, 0, p.radius * 2.5, 0, Math.PI * 2);
+                ctx.fillStyle = 'rgba(168, 85, 247, 0.18)';
+                ctx.fill();
+
+                ctx.beginPath();
+                ctx.arc(0, 0, 65, 0, Math.PI * 2);
+                ctx.strokeStyle = 'rgba(168, 85, 247, 0.35)';
+                ctx.lineWidth = 1.5;
+                ctx.setLineDash([4, 6]);
+                ctx.stroke();
+                ctx.setLineDash([]);
+
+                ctx.strokeStyle = '#a855f7';
+                for (let i = 0; i < 4; i++) {
+                    ctx.beginPath();
+                    ctx.lineWidth = 2.0 - i * 0.3;
+                    const arcStart = (i * Math.PI * 2) / 4;
+                    ctx.arc(0, 0, p.radius * (1.2 + i * 0.35), arcStart, arcStart + Math.PI * 0.6);
+                    ctx.stroke();
+                }
+                ctx.restore();
+
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.radius * 0.9, 0, Math.PI * 2);
+                ctx.fillStyle = '#000000';
+                ctx.fill();
+
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.radius * 0.9, 0, Math.PI * 2);
+                ctx.strokeStyle = '#a855f7';
+                ctx.lineWidth = 2.0;
+                ctx.stroke();
+
+                ctx.restore();
+                continue;
+            }
+
             // Draw high-performance procedural glow rings for explosions instead of canvas shadowBlur
             const isExploding = p.state === 'EXPANDING' || p.state === 'FROZEN' || p.state === 'SHRINKING';
             if (isExploding) {
@@ -1116,6 +1336,19 @@ export class GameEngine {
 
             // Distinct geometric indicators on active Drifting special shapes
             if (p.state === 'DRIFTING') {
+                if (p.isDarkMatter) {
+                    ctx.beginPath();
+                    ctx.arc(p.x, p.y, p.radius + 4, 0, Math.PI * 2);
+                    ctx.strokeStyle = 'rgba(217, 70, 239, 0.6)';
+                    ctx.lineWidth = 1.25;
+                    ctx.stroke();
+
+                    ctx.beginPath();
+                    ctx.arc(p.x, p.y, p.radius * 0.35, 0, Math.PI * 2);
+                    ctx.fillStyle = '#FFFFFF';
+                    ctx.fill();
+                }
+
                 if (p.type === 'GRAVITY') {
                     // Moving orbital gravity indicator
                     ctx.beginPath();
@@ -1238,6 +1471,38 @@ export class GameEngine {
             ctx.lineWidth = 3;
             ctx.strokeText(t.text, t.x, t.y);
             ctx.fillText(t.text, t.x, t.y);
+            ctx.restore();
+        }
+
+        // Onboarding Tutorial Center Pulsing Ring guide
+        if (this.level === 0 && !this.tapped) {
+            ctx.save();
+            ctx.globalCompositeOperation = 'screen';
+            const cx = this.width / 2;
+            const cy = this.height / 2;
+            const pulseRadius = 35 + Math.sin(this.orbitAngle * 4) * 8;
+            
+            // Outer pulsing ring
+            ctx.beginPath();
+            ctx.arc(cx, cy, pulseRadius, 0, Math.PI * 2);
+            ctx.strokeStyle = 'rgba(168, 85, 247, 0.7)';
+            ctx.lineWidth = 3;
+            ctx.stroke();
+
+            // Inner glowing core
+            ctx.beginPath();
+            ctx.arc(cx, cy, 6, 0, Math.PI * 2);
+            ctx.fillStyle = '#c084fc';
+            ctx.shadowBlur = 10;
+            ctx.shadowColor = '#a855f7';
+            ctx.fill();
+
+            // Connecting orbital rings
+            ctx.beginPath();
+            ctx.arc(cx, cy, 18, 0, Math.PI * 2);
+            ctx.strokeStyle = 'rgba(168, 85, 247, 0.25)';
+            ctx.setLineDash([4, 4]);
+            ctx.stroke();
             ctx.restore();
         }
 

@@ -901,6 +901,14 @@ export default function App() {
         setScreen('GAME');
     };
 
+    const returnToMainMenu = () => {
+        initAudio(); // Initialize audio securely
+        if (screen === 'ROUND_OVER' && didWinLast) {
+            setLevel(l => l + 1);
+        }
+        setScreen('START');
+    };
+
     // Advanced Input Handling coordinate calculations
     const handlePointerDown = (e: PointerEvent<HTMLCanvasElement>) => {
         if (!engineRef.current || (liveStats && liveStats.sparksLeft <= 0)) return;
@@ -1226,6 +1234,59 @@ export default function App() {
                                 <HelpCircle className="w-4 h-4" />
                                 {showHelp ? 'HIDE SCI-OPS MANUAL' : 'VIEW SCI-OPS MANUAL'}
                             </button>
+                        </div>
+
+                        {/* REACTOR ANOMALY PROGRESS TRACKER */}
+                        <div className="w-full bg-[#111114]/90 border border-zinc-900 rounded-2xl p-4 text-left space-y-3 mb-6 select-none font-sans max-w-[400px]">
+                            <div className="flex items-center justify-between">
+                                <span className="text-[10px] font-black uppercase text-cyan-400 tracking-wider flex items-center gap-1.5 font-mono">
+                                    <Cpu className="w-3.5 h-3.5 text-cyan-400 animate-pulse animate-duration-2000" /> REACTOR ANOMALY SCANNER
+                                </span>
+                                <span className="text-[9px] font-mono text-zinc-500 uppercase">Sector {level}</span>
+                            </div>
+                            
+                            <div className="space-y-2">
+                                {/* Progress bar track */}
+                                <div className="relative w-full h-1.5 bg-zinc-950 rounded-full overflow-hidden border border-zinc-900/60">
+                                    <div 
+                                        className="h-full bg-gradient-to-r from-cyan-400 via-fuchsia-500 to-purple-500 shadow-[0_0_10px_rgba(168,85,247,0.3)] transition-all duration-500"
+                                        style={{ width: `${Math.min(100, Math.max(5, (level / 35) * 100))}%` }}
+                                    />
+                                </div>
+                                
+                                {/* Hazard Nodes Grid */}
+                                <div className="grid grid-cols-4 gap-1.5 pt-1.5">
+                                    {[
+                                        { lvl: 2, icon: '🧬', name: 'Decay Cell', desc: 'Resists herding and snuffs out active explosions.' },
+                                        { lvl: 3, icon: '🌪️', name: 'Void Anomaly', desc: 'Pulls atoms in and swallows detonator sparks.' },
+                                        { lvl: 20, icon: '💥', name: 'Quantum Pulsar', desc: 'Pulsates EM disruption to repel particles and damp explosions.' },
+                                        { lvl: 35, icon: '⚛️', name: 'Resonance Dampener', desc: 'Magenta collapsing nodes & gravity event horizons.' }
+                                    ].map((hz) => {
+                                        const unlocked = level >= hz.lvl;
+                                        return (
+                                            <div 
+                                                key={hz.lvl}
+                                                title={unlocked ? hz.desc : `Classified anomaly signature detected. Unlock requirements: Sector ${hz.lvl}`}
+                                                className={`p-2 rounded-xl border flex flex-col items-center text-center transition-all duration-300 ${
+                                                    unlocked 
+                                                        ? 'bg-zinc-900/20 border-cyan-500/20 text-zinc-300 shadow-[0_0_8px_rgba(34,211,238,0.02)]' 
+                                                        : 'bg-black/20 border-zinc-900/60 text-zinc-600'
+                                                }`}
+                                            >
+                                                <span className={`text-sm mb-1 select-none transition-transform duration-300 hover:scale-110 ${unlocked ? 'filter drop-shadow-[0_0_4px_rgba(34,211,238,0.35)]' : 'opacity-25 grayscale'}`}>
+                                                    {unlocked ? hz.icon : '🔒'}
+                                                </span>
+                                                <span className={`block text-[7px] font-mono font-black uppercase tracking-wider leading-none ${unlocked ? 'text-zinc-400' : 'text-zinc-650'}`}>
+                                                    SEC {hz.lvl}
+                                                </span>
+                                                <span className={`block text-[8px] font-black leading-tight truncate w-full mt-1.5 uppercase tracking-wide font-sans ${unlocked ? 'text-cyan-400' : 'text-zinc-650 font-bold'}`}>
+                                                    {unlocked ? hz.name.split(' ')[0] : 'SECRET'}
+                                                </span>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </div>
                         </div>
 
                         {/* Top Score banner inside Start View */}
@@ -2180,6 +2241,18 @@ export default function App() {
                                             )}
                                         </button>
                                     )}
+
+                                    <button 
+                                        onClick={returnToMainMenu}
+                                        disabled={didWinLast && !slotHasSpun}
+                                        className={`w-full py-2.5 rounded-xl font-bold text-sm flex items-center justify-center gap-2 border transition-all cursor-pointer ${
+                                            didWinLast && !slotHasSpun
+                                                ? 'bg-zinc-900 text-zinc-600 border-zinc-850 cursor-not-allowed shadow-none'
+                                                : 'bg-zinc-900 text-zinc-300 border-zinc-800 hover:bg-zinc-800 active:scale-95'
+                                        }`}
+                                    >
+                                        🏠 RETURN TO MAIN MENU
+                                    </button>
 
                                     <button 
                                         onClick={() => {

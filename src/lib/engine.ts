@@ -1,7 +1,7 @@
 import { playDetonate, playAlertBeep } from './audio';
 
 export type ParticleState = 'DRIFTING' | 'EXPANDING' | 'FROZEN' | 'SHRINKING' | 'DEAD';
-export type ParticleType = 'STANDARD' | 'GRAVITY' | 'SPLITTER' | 'DECAY' | 'VOID_ANOMALY' | 'DAMPENER' | 'SINKHOLE';
+export type ParticleType = 'STANDARD' | 'GRAVITY' | 'SPLITTER' | 'DECAY' | 'VOID_ANOMALY' | 'DAMPENER' | 'SINKHOLE' | 'PULSAR';
 export type ParticleTheme = 'STANDARD' | 'NEBULA' | 'MATRIX' | 'SUPERNOVA';
 
 export interface StoreUpgrades {
@@ -65,7 +65,7 @@ export interface SplitterSpark {
 }
 
 // Highly vibrant theme color variations: Standard, Nebula, Matrix, Supernova
-export const THEME_COLORS: Record<ParticleTheme, Record<Exclude<ParticleType, 'VOID_ANOMALY' | 'DAMPENER' | 'SINKHOLE'>, string[]>> = {
+export const THEME_COLORS: Record<ParticleTheme, Record<Exclude<ParticleType, 'VOID_ANOMALY' | 'DAMPENER' | 'SINKHOLE' | 'PULSAR'>, string[]>> = {
     STANDARD: {
         STANDARD: ['#22d3ee', '#fb7185', '#a3e635'],
         GRAVITY: ['#e879f9'],
@@ -277,7 +277,7 @@ export class GameEngine {
                 }
             }
 
-            const selectionColors = currentThemeColors[pType as Exclude<ParticleType, 'VOID_ANOMALY' | 'DAMPENER' | 'SINKHOLE'>] || THEME_COLORS.STANDARD[pType as Exclude<ParticleType, 'VOID_ANOMALY' | 'DAMPENER' | 'SINKHOLE'>];
+            const selectionColors = currentThemeColors[pType as Exclude<ParticleType, 'VOID_ANOMALY' | 'DAMPENER' | 'SINKHOLE' | 'PULSAR'>] || THEME_COLORS.STANDARD[pType as Exclude<ParticleType, 'VOID_ANOMALY' | 'DAMPENER' | 'SINKHOLE' | 'PULSAR'>];
             const chosenColor = selectionColors[Math.floor(Math.random() * selectionColors.length)];
 
             const isDarkMatterChance = (this.prestigeUpgrades.darkMatterConversion || 0) * 0.10;
@@ -368,6 +368,23 @@ export class GameEngine {
                 state: 'DRIFTING',
                 type: 'SINKHOLE',
                 timer: 0
+            });
+        }
+        
+        // 6. Spawn Quantum Pulsars at level 20+ (1 to 3 pulsars)
+        const pulsarCount = level < 20 ? 0 : Math.min(3, 1 + Math.floor((level - 20) / 8));
+        for (let i = 0; i < pulsarCount; i++) {
+            this.particles.push({
+                x: Math.random() * (this.width - 100) + 50,
+                y: Math.random() * (this.height - 100) + 50,
+                vx: (Math.random() - 0.5) * speedScale * 0.25,
+                vy: (Math.random() - 0.5) * speedScale * 0.25,
+                radius: 12.0 * radiusScale,
+                maxRadius: 0, // Cannot explode
+                color: '#f97316', // Orange warning theme
+                state: 'DRIFTING',
+                type: 'PULSAR',
+                timer: Math.floor(Math.random() * 120) // Randomize starting timer offsets
             });
         }
         
@@ -745,6 +762,84 @@ export class GameEngine {
             }
         }
 
+        // --- QUANTUM PULSAR INSTABILITY WAVES ---
+        const activeExplodingCores = this.particles.filter(p => 
+            p.state === 'EXPANDING' || p.state === 'FROZEN' || p.state === 'SHRINKING'
+        );
+
+        for (let p of this.particles) {
+            if (p.type === 'PULSAR') {
+                p.timer--;
+                if (p.timer <= 0) {
+                    p.timer = 220; // 3.6s cycle
+                }
+
+                // Active shockwave expansion phase (first 40 frames of countdown)
+                if (p.timer > 180) {
+                    const elapsed = 220 - p.timer; // 1 to 40
+                    const waveRadius = 120 * (elapsed / 40);
+
+                    // 1. Repel standard drifting atoms hit by wavefront
+                    for (let other of this.particles) {
+                        if (other === p || other.state !== 'DRIFTING' || other.type === 'PULSAR') continue;
+                        const dx = other.x - p.x;
+                        const dy = other.y - p.y;
+                        const distSq = dx*dx + dy*dy;
+                        const dist = Math.sqrt(distSq || 1);
+
+                        // Repel if close to active expanding shockwave wavefront
+                        if (Math.abs(dist - waveRadius) < 16) {
+                            const force = 3.8;
+                            other.vx += (dx / dist) * force;
+                            other.vy += (dy / dist) * force;
+                        }
+                    }
+
+                    // 2. Collapse active explosion rings caught inside expanding shockwave
+                    for (let exp of activeExplodingCores) {
+                        const dx = exp.x - p.x;
+                        const dy = exp.y - p.y;
+                        const distSq = dx*dx + dy*dy;
+                        if (distSq < waveRadius * waveRadius) {
+                            if (exp.state !== 'SHRINKING') {
+                                exp.state = 'SHRINKING';
+                                exp.timer = 0;
+                                exp.radius = Math.max(1.0, exp.radius * 0.15); // Instant 15% collapse
+                                
+                                this.texts.push({
+                                    x: exp.x,
+                                    y: exp.y - 12,
+                                    text: '⚠️ DAMPENED!',
+                                    life: 0.8,
+                                    color: '#f97316'
+                                });
+                            }
+                        }
+                    }
+                }
+
+                // 3. Swallow detonator sparks dropped inside event horizon (30px)
+                for (let other of this.particles) {
+                    if (other.type === 'SINKHOLE' || other.type === 'DAMPENER' || other.type === 'VOID_ANOMALY' || other.type === 'PULSAR') continue;
+                    // Spark in active trigger expansion stage
+                    if (other.state === 'EXPANDING' && other.radius < 8) {
+                        const dx = other.x - p.x;
+                        const dy = other.y - p.y;
+                        if (dx*dx + dy*dy < 30 * 30) {
+                            other.state = 'DEAD';
+                            this.texts.push({
+                                x: other.x,
+                                y: other.y - 15,
+                                text: "💥 SPARK VAPORIZED!",
+                                life: 1.2,
+                                color: "#f97316"
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
         // 2. Update all drift particle locations & state transitions
         const decayCells = this.particles.filter(dc => dc.state === 'DRIFTING' && dc.type === 'DECAY');
 
@@ -821,7 +916,7 @@ export class GameEngine {
                 const dx = p.x - s.x;
                 const dy = p.y - s.y;
                 if (dx*dx + dy*dy < (p.radius + 12) * (p.radius + 12)) {
-                    if (p.type === 'DAMPENER' || p.type === 'SINKHOLE') {
+                    if (p.type === 'DAMPENER' || p.type === 'SINKHOLE' || p.type === 'PULSAR') {
                         s.life = 0; // swallow spark
                         this.spawnDecayAbsorbJuice(p);
                         didClearViaSpark = true;
@@ -902,7 +997,7 @@ export class GameEngine {
         let didClear = false;
         for (let p1 of this.particles) {
             if (p1.state !== 'DRIFTING') continue;
-            if (p1.type === 'DAMPENER' || p1.type === 'SINKHOLE') continue; // Hazards cannot explode
+            if (p1.type === 'DAMPENER' || p1.type === 'SINKHOLE' || p1.type === 'PULSAR') continue; // Hazards cannot explode
             
             for (let exp of explosives) {
                 const dx = p1.x - exp.x;
@@ -1305,6 +1400,73 @@ export class GameEngine {
                 ctx.strokeStyle = '#a855f7';
                 ctx.lineWidth = 2.0;
                 ctx.stroke();
+
+                ctx.restore();
+                continue;
+            }
+
+            // Render Quantum Pulsar
+            if (p.type === 'PULSAR') {
+                ctx.save();
+                
+                // Concentric warning rings
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.radius * 2.2, 0, Math.PI * 2);
+                ctx.fillStyle = 'rgba(249, 115, 22, 0.12)';
+                ctx.fill();
+
+                // Draw expanding EM shockwave
+                if (p.timer > 180) {
+                    const elapsed = 220 - p.timer;
+                    const waveRadius = 120 * (elapsed / 40);
+                    const alpha = 1.0 - (elapsed / 40);
+
+                    ctx.beginPath();
+                    ctx.arc(p.x, p.y, waveRadius, 0, Math.PI * 2);
+                    ctx.strokeStyle = `rgba(249, 115, 22, ${alpha * 0.75})`;
+                    ctx.lineWidth = 3.5;
+                    ctx.stroke();
+
+                    ctx.beginPath();
+                    ctx.arc(p.x, p.y, waveRadius, 0, Math.PI * 2);
+                    ctx.strokeStyle = `rgba(255, 255, 255, ${alpha * 0.4})`;
+                    ctx.lineWidth = 1.5;
+                    ctx.stroke();
+                }
+
+                // Swirling charging ring indicators
+                ctx.translate(p.x, p.y);
+                ctx.rotate(this.orbitAngle * 2.0);
+                ctx.beginPath();
+                ctx.arc(0, 0, p.radius * 1.4, 0, Math.PI * 0.6);
+                ctx.strokeStyle = '#f97316';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+                
+                ctx.beginPath();
+                ctx.arc(0, 0, p.radius * 1.4, Math.PI, Math.PI * 1.6);
+                ctx.strokeStyle = '#f97316';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+
+                ctx.restore();
+
+                // Solid dark core surrounded by neon-orange boundary
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.radius * 0.85, 0, Math.PI * 2);
+                ctx.fillStyle = '#000000';
+                ctx.fill();
+
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.radius * 0.85, 0, Math.PI * 2);
+                ctx.strokeStyle = '#f97316';
+                ctx.lineWidth = 2.0;
+                ctx.stroke();
+
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.radius * 0.35, 0, Math.PI * 2);
+                ctx.fillStyle = '#ffffff';
+                ctx.fill();
 
                 ctx.restore();
                 continue;

@@ -15,7 +15,7 @@ Chain Reaction is a single-screen hyper-casual freemium mobile/web game built us
 6. **Assets & App Icons:** Automatically generated using `@capacitor/assets` from a single dark-theme centered master icon (`assets/logo.png`).
 
 ### Key Files in Workspace
-* [src/App.tsx](file:///c:/Users/David%20Glasser/OneDrive/Documents/Projects/Chain%20Reaction/src/App.tsx) — Main dashboard UI, screen states (`'START'`, `'GAME'`, `'ROUND_OVER'`, `'SHOP'`, `'PRESTIGE_SHOP'`), persistent upgrades storage, guided onboarding cards, best score panels, and the **Quantum Syndicate Portal** premium monetization flow.
+* [src/App.tsx](file:///c:/Users/David%20Glasser/OneDrive/Documents/Projects/Chain%20Reaction/src/App.tsx) — Main dashboard UI, screen states (`'START'`, `'GAME'`, `'ROUND_OVER'`, `'SHOP'`, `'PRESTIGE_SHOP'`), persistent upgrades storage, guided onboarding cards, best score panels, the dashboard **Reactor Anomaly Scanner** progress tracker, and the **Quantum Syndicate Portal** premium monetization flow.
 * [src/lib/engine.ts](file:///c:/Users/David%20Glasser/OneDrive/Documents/Projects/Chain%20Reaction/src/lib/engine.ts) — Physics engine running within canvas loops. Handles drifting particles, gravity sweep vectors, void singularities, decay conversions, Resonance Dampeners, Gravity Sinkholes, and chain-reaction calculations.
 * [src/lib/audio.ts](file:///c:/Users/David%20Glasser/OneDrive/Documents/Projects/Chain%20Reaction/src/lib/audio.ts) — Procedural Web Audio API sound synthesis.
 * [src/index.css](file:///c:/Users/David%20Glasser/OneDrive/Documents/Projects/Chain%20Reaction/src/index.css) — Global CSS custom keyframe definitions (`fadeIn`, `scaleUp`, `pulse-ring`, `bounce-finger`, `bounce-finger-left`) and animations.
@@ -77,8 +77,9 @@ To incentivize shop upgrades, the reactor grid difficulty spikes dynamically:
    $$\text{RadiusMultiplier} = \text{BaseRadius} \times 0.88^{\max(0, \text{Level} - 5)}$$
 3. **Void Singularities (`VOID_ANOMALY`):** Swirling obstacle zones pulling atoms in and swallowing active explosions (Level 3+).
 4. **Anti-Matter Decay Cells (`DECAY`):** Heavy particles resisting sweeps and extinguishing overlapping chain-reactions (Level 2+).
-5. **Resonance Dampeners (`DAMPENER` - Sector 35+):** Magenta drifting hazards that emit a suppression field, instantly collapsing overlapping active chain reactions to 15% size.
-6. **Gravity Sinkholes (`SINKHOLE` - Sector 35+):** Stationary black vortexes with accretion rings that actively suck standard atoms in and swallow detonator sparks dropped inside their event horizons.
+5. **Quantum Pulsars (`PULSAR` - Sector 20+):** Slowly drifting orange warning hazards running on a 220-frame EM cycle, emitting expanding shockwaves that repel particles (impulse 3.8) and instantly collapse overlapping explosions to 15% size.
+6. **Resonance Dampeners (`DAMPENER` - Sector 35+):** Magenta drifting hazards that emit a suppression field, instantly collapsing overlapping active chain reactions to 15% size.
+7. **Gravity Sinkholes (`SINKHOLE` - Sector 35+):** Stationary black vortexes with accretion rings that actively suck standard atoms in and swallow detonator sparks dropped inside their event horizons.
 
 ---
 

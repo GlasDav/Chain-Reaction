@@ -1,4 +1,4 @@
-import { playDetonate, playAlertBeep } from './audio';
+import { playDetonate, playAlertBeep, playGravityAbsorb } from './audio';
 
 export type ParticleState = 'DRIFTING' | 'EXPANDING' | 'FROZEN' | 'SHRINKING' | 'DEAD';
 export type ParticleType = 'STANDARD' | 'GRAVITY' | 'SPLITTER' | 'DECAY' | 'VOID_ANOMALY' | 'DAMPENER' | 'SINKHOLE' | 'PULSAR';
@@ -224,7 +224,7 @@ export class GameEngine {
 
         // Strict 100% Target to pass
         this.targetPct = 100;
-        this.totalDrifting = level === 0 ? 12 : (28 + level * 5); // Slightly fewer particles per level since 100% is required, keeping it balanced but challenging!
+        this.totalDrifting = level === 0 ? 12 : Math.min(85, 20 + Math.floor(level * 1.3)); // Regulated particle density so herding is required and cascading reactions don't make it too easy to win
         this.cleared = 0;
         this.darkMatterCleared = 0;
         this.combo = 0;
@@ -653,11 +653,22 @@ export class GameEngine {
                     const powerLvl = this.upgrades.magnetPower || 0;
                     const prestigeTractorLvl = this.prestigeUpgrades.tractorPulsar || 0;
                     const pullMultiplier = (1.0 + 3.0 * (1 - Math.pow(0.80, powerLvl))) * (1.0 + 0.20 * prestigeTractorLvl);
-                    // Decay particles are heavy anti-matter, matching 30% magnet strength
-                    const baseForce = p.type === 'DECAY' ? 0.06 : 0.22;
-                    const power = (1 - dist / 185) * baseForce * pullMultiplier;
-                    p.vx += (dx / dist) * power;
-                    p.vy += (dy / dist) * power;
+                    
+                    const isHazard = p.type === 'DECAY' || p.type === 'VOID_ANOMALY' || p.type === 'DAMPENER';
+                    if (isHazard) {
+                        // Repel hazards away to carve safe herding paths!
+                        // Anomalies/dampeners repel faster than heavy decay cells.
+                        const baseRepelForce = p.type === 'DECAY' ? -0.15 : -0.28;
+                        const power = (1 - dist / 185) * baseRepelForce * pullMultiplier;
+                        p.vx += (dx / dist) * power;
+                        p.vy += (dy / dist) * power;
+                    } else {
+                        // Pull standard and splitter/gravity clearable atoms in
+                        const baseForce = 0.22;
+                        const power = (1 - dist / 185) * baseForce * pullMultiplier;
+                        p.vx += (dx / dist) * power;
+                        p.vy += (dy / dist) * power;
+                    }
                 }
             }
         } else if (!this.magnetActive && this.upgrades.magnetAutopilot && this.upgrades.magnetAutopilot > 0) {
@@ -976,7 +987,11 @@ export class GameEngine {
                     this.combo++;
                     this.maxCombo = Math.max(this.combo, this.maxCombo);
 
-                    playDetonate(this.combo);
+                    if (p.type === 'GRAVITY') {
+                        playGravityAbsorb();
+                    } else {
+                        playDetonate(this.combo);
+                    }
                     this.spawnExplosionJuice(p);
                     if (p.type === 'SPLITTER') {
                         this.triggerSplitterSparks(p);
@@ -1087,7 +1102,11 @@ export class GameEngine {
                     this.combo++;
                     this.maxCombo = Math.max(this.combo, this.maxCombo);
                     
-                    playDetonate(this.combo);
+                    if (p1.type === 'GRAVITY') {
+                        playGravityAbsorb();
+                    } else {
+                        playDetonate(this.combo);
+                    }
                     this.spawnExplosionJuice(p1);
                     
                     if (p1.type === 'SPLITTER') {
@@ -1231,6 +1250,15 @@ export class GameEngine {
         
         // Active Herding Swirl Vortex Design
         if (this.magnetActive && this.magnetFuel > 0) {
+            // Outer hazard repulsion boundary indicator (Issue 3)
+            ctx.beginPath();
+            ctx.arc(this.magnetX, this.magnetY, 185, 0, Math.PI * 2);
+            ctx.strokeStyle = `rgba(244, 63, 94, ${0.05 + Math.sin(this.orbitAngle * 1.5) * 0.02})`;
+            ctx.lineWidth = 1;
+            ctx.setLineDash([4, 12]);
+            ctx.stroke();
+            ctx.setLineDash([]); // Reset dashed line
+
             // Pulsating magnetic ring
             ctx.beginPath();
             ctx.arc(this.magnetX, this.magnetY, 40, 0, Math.PI * 2);

@@ -9,7 +9,7 @@ Welcome to the **Chain Reaction** workspace context document. This handbook is d
 Chain Reaction is a single-screen hyper-casual freemium mobile/web game built using the following stack:
 1. **Frontend Core:** React 19, TypeScript, and Vite.
 2. **Graphics & Rendering:** HTML5 Canvas API driven by a custom physics engine class (`GameEngine` in `src/lib/engine.ts`).
-3. **Sound System:** Procedural Web Audio API synthesizer (`src/lib/audio.ts`) providing custom oscillators, chord sweeps, and warning beeps.
+3. **Sound System:** Procedural Web Audio API synthesizer (`src/lib/audio.ts`) providing custom oscillators, chord sweeps, warning beeps, and a dedicated gravimetric vortex sweep (`playGravityAbsorb`) to acoustically distinguish `'GRAVITY'` particle detonations from standard elements.
 4. **Styling:** Tailwind CSS v4.0 with vibrant neon-glow theme colors (STANDARD, NEBULA, MATRIX, SUPERNOVA).
 5. **Mobile Native Shells:** Capacitor wrappers scaffolded for iOS and Android, compiling in Xcode and Android Studio.
 6. **Assets & App Icons:** Automatically generated using `@capacitor/assets` from a single dark-theme centered master icon (`assets/logo.png`).
@@ -37,6 +37,7 @@ $$\text{Value}(L) = \text{BaseValue} + \text{MaxIncrease} \times (1 - \lambda^L)
   * *Formula:* $\text{FuelCap}(L) = 100 + 400 \times (1 - 0.85^L)$ *(Asymptotes at $500$ sweep capacity)*
 * **Tractor Drive Pulse (`magnetPower`):** Gravitational sweep pull strength.
   * *Formula:* $\text{PullStrength}(L) = 1.0 + 3.0 \times (1 - 0.80^L)$ *(Asymptotes at $4.0\text{x}$ pull power)*
+  * *Bipolar Repulsion Field:* Generates a hazard repulsion field at a $185\text{px}$ radius (outlined by a pulsating dashed red HUD ring). Clearable atoms are pulled in, while dangerous **Decay Cells**, **Void Singularities**, and **Resonance Dampeners** are repelled away to carve out safe sweeping pathways.
 * **Resonance Sustain Core (`resonanceDuration`):** Active explosion hold frames duration.
   * *Formula:* $\text{HoldFrames}(L) = 120 + 240 \times (1 - 0.82^L)$ *(Asymptotes at $360$ frames / 6s)*
 
@@ -48,6 +49,11 @@ These stats increase linearly up to logical limits (e.g. 100% absorption or 8 sp
 * **Reactor Volatility (`specialSpawnRate`):** Spawn frequency of special atoms. Capped at **Level 10 (65%)**.
 * **Vortex Fuel Recycler (`magnetAutopilot`):** Inactive magnet sweep fuel trickle recharge. Capped at **Level 10 (0.40/f)**.
 * **Combo Resonance Charger (`comboShardMultiplier`):** Bonus shards per peak combo. Uncapped ($\text{Bonus} = 4 \times L$).
+
+### Leftover Spark Economy Bonuses
+To reward efficiency and precise tactical placements, completing a level with unused trigger sparks awards a significant economy bonus:
+$$\text{ShardBonus} = \text{SparksLeft} \times 50\text{ Shards}$$
+This bonus is added directly to the round's unmultiplied rewards total and is fully eligible for slot machine resonance multiplication during the fuser stage.
 
 ### Cost Progression (Exponential with Prestige Discounts)
 Costs scale exponentially for all standard shop items, attenuated by permanent prestige research efficiency modifiers:
@@ -75,11 +81,13 @@ To incentivize shop upgrades, the reactor grid difficulty spikes dynamically:
    $$\text{SpeedMultiplier} = 1.45 \times 1.18^{\max(0, \text{Level} - 5)}$$
 2. **Hitbox Radius Shrinkage:** Particle collision hitboxes shrink exponentially:
    $$\text{RadiusMultiplier} = \text{BaseRadius} \times 0.88^{\max(0, \text{Level} - 5)}$$
-3. **Void Singularities (`VOID_ANOMALY`):** Swirling obstacle zones pulling atoms in and swallowing active explosions (Level 3+).
-4. **Anti-Matter Decay Cells (`DECAY`):** Heavy particles resisting sweeps and extinguishing overlapping chain-reactions (Level 2+).
-5. **Quantum Pulsars (`PULSAR` - Sector 20+):** Slowly drifting orange warning hazards running on a 220-frame EM cycle, emitting expanding shockwaves that repel particles (impulse 3.8) and instantly collapse overlapping explosions to 15% size.
-6. **Resonance Dampeners (`DAMPENER` - Sector 35+):** Magenta drifting hazards that emit a suppression field, instantly collapsing overlapping active chain reactions to 15% size.
-7. **Gravity Sinkholes (`SINKHOLE` - Sector 35+):** Stationary black vortexes with accretion rings that actively suck standard atoms in and swallow detonator sparks dropped inside their event horizons.
+3. **Particle Swarm Regulation:** Clearable drifting particle counts are moderated to prevent automatic cascading wins:
+   $$\text{Count}(L) = \min(85, 20 + \lfloor L \times 1.3 \rfloor)$$
+4. **Void Singularities (`VOID_ANOMALY`):** Swirling obstacle zones pulling atoms in and swallowing active explosions (Level 3+).
+5. **Anti-Matter Decay Cells (`DECAY`):** Heavy particles resisting sweeps, repelled by active sweeper fields, and extinguishing overlapping chain-reactions (Level 2+).
+6. **Quantum Pulsars (`PULSAR` - Sector 20+):** Slowly drifting orange warning hazards running on a 220-frame EM cycle, emitting expanding shockwaves that repel particles (impulse 3.8) and instantly collapse overlapping explosions to 15% size.
+7. **Resonance Dampeners (`DAMPENER` - Sector 35+):** Magenta drifting hazards repelled by active sweeps that emit a suppression field, instantly collapsing active chain reactions to 15% size.
+8. **Gravity Sinkholes (`SINKHOLE` - Sector 35+):** Stationary black vortexes with accretion rings that actively suck standard atoms in and swallow detonator sparks dropped inside their event horizons.
 
 ---
 
@@ -144,6 +152,19 @@ The interactive grid calculates fabric-warping gravity lines in `engine.ts` rela
 - **Level Progression:** Saves current active level progression in `localStorage` under the key `chain_reaction_level_v3`, restoring the user's grid stage exactly upon relaunch.
 - **Sector High Scores:** Tracks and saves best scores achieved *per level* in `localStorage` under `chain_reaction_level_scores_v3`. Rendered on the results screen as a 3-column stats panel (Current Score, Peak Combo, Sector Best).
 - **Hard Database Wipe:** An accessibility button `[ ⚠️ RESET SYSTEM DATA ]` on the Start screen clears all database storage entries and resets state models back to clean-slate defaults.
+
+### 6. Frozen Viewport Store Headers
+To maintain access to dashboard exit paths and live shard balances during vertical scrolls, the **Quantum Store** and **Prestige Shop** overlay cards implement fixed viewport headers:
+- Locks the parent screen container using `overflow-hidden`.
+- Renders the header as a static `flex-shrink-0` block inside the flex tree.
+- Wraps all upgrading cards and unlockable themes inside a scrolling `flex-1 overflow-y-auto` view pane, allowing elements to slide underneath the frozen top bar seamlessly.
+
+### 7. Real-Time Global Leaderboards (Supabase Integration)
+- **Database Backend:** Dedicated Supabase project reference `ycvztrpgihepiwqqzefz` under the **Chain Reaction** organization, operating on publishable anonymous client credentials with public SELECT/INSERT row-level security (RLS) policies.
+- **Quantum Run Records (Arcade Standings):** Displays the top 10 longest successful continuous arcade runs. Submitted at run termination (fails, near-miss forfeit, or active-game forfeit) with a touch-friendly virtual sci-fi keypad prompting for exactly 3 uppercase pilot characters.
+- **Galactic Career Standings:** Tracks and displays cumulative lifetime career scores silently synced and updated to the database as players earn shards during standard gameplay sweeps.
+- **Prestige Reset Loop Protection:** Automatically intercepts "🌌 RETIRE SECTOR & RESET PROGRESS" requests, prompting players to record their active continuous run scores to the database before executing standard progress resets.
+- **Standings Deck UI Modal:** Renders interactive dual-tab rankings grids with trophy accents (🥇, 🥈, 🥉), short-date formats, active pilot tag signatures, dynamic loader animations, and custom row highlights for the active player.
 
 ---
 

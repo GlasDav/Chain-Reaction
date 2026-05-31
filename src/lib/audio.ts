@@ -289,3 +289,29 @@ export function playAlertBeep() {
     } catch {}
 }
 
+export function playGravityAbsorb() {
+    if (!audioCtx) return;
+    try {
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+
+        // Deeper, complex space-warp sound (downward sweep)
+        osc.frequency.setValueAtTime(320, audioCtx.currentTime); // Start medium-high
+        osc.frequency.exponentialRampToValueAtTime(80, audioCtx.currentTime + 0.35); // Deep sweep down
+        osc.type = 'triangle'; // Warmer, more resonant wave
+
+        gain.gain.setValueAtTime(0, audioCtx.currentTime);
+        gain.gain.linearRampToValueAtTime(0.25, audioCtx.currentTime + 0.03); // Quick swell
+        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.4); // Fade out
+
+        osc.start();
+        osc.stop(audioCtx.currentTime + 0.45);
+    } catch (e) {
+        console.error("Audio gravity absorb error", e);
+    }
+}
+
+

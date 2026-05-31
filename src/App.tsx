@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, PointerEvent } from 'react';
 import { GameEngine, GameStats, StoreUpgrades, ParticleTheme, THEME_COLORS, PrestigeUpgrades } from './lib/engine';
+import { getTopRankings, submitRanking, LeaderboardEntry } from './lib/supabaseClient';
 import { 
     initAudio, 
     playPerfectBonus, 
@@ -199,6 +200,7 @@ const THEME_SHOP_ITEMS: ThemeShopItem[] = [
 export default function App() {
     const [screen, setScreen] = useState<Screen>('START');
     const [shopReferrer, setShopReferrer] = useState<Screen>('START');
+    const [prestigeShopReferrer, setPrestigeShopReferrer] = useState<Screen>('START');
     const [showHelp, setShowHelp] = useState(false);
     const [isMuted, setIsMuted] = useState(() => getMuteState());
     const [isPaused, setIsPaused] = useState(false);
@@ -291,7 +293,7 @@ export default function App() {
     });
 
     // Breakdown for round rewards
-    const [earnedShardStats, setEarnedShardStats] = useState<{ base: number; perfect: number; combo: number; darkMatter?: number; total: number } | null>(null);
+    const [earnedShardStats, setEarnedShardStats] = useState<{ base: number; perfect: number; combo: number; sparksBonus?: number; darkMatter?: number; total: number } | null>(null);
     
     // Persistent clear streaks
     const [clearStreak, setClearStreak] = useState<number>(() => {
@@ -346,6 +348,75 @@ export default function App() {
     const [iapPack, setIapPack] = useState<{ name: string; price: string; shards: number } | null>(null);
     const [iapSuccess, setIapSuccess] = useState(false);
     const [floatNotifs, setFloatNotifs] = useState<{ id: number; text: string }[]>([]);
+
+    // Leaderboard state variables
+    const [pilotTag, setPilotTag] = useState<string>(() => {
+        try {
+            return localStorage.getItem('chain_reaction_pilot_tag_v3') || '';
+        } catch {
+            return '';
+        }
+    });
+    const [runScore, setRunScore] = useState<number>(() => {
+        try {
+            return parseInt(localStorage.getItem('chain_reaction_run_score_v3') || '0', 10);
+        } catch {
+            return 0;
+        }
+    });
+    const [careerScoreSubmitted, setCareerScoreSubmitted] = useState<number>(() => {
+        try {
+            return parseInt(localStorage.getItem('chain_reaction_career_submitted_v3') || '0', 10);
+        } catch {
+            return 0;
+        }
+    });
+    const [isLeaderboardOpen, setIsLeaderboardOpen] = useState(false);
+    const [leaderboardType, setLeaderboardType] = useState<'arcade' | 'career'>('arcade');
+    const [arcadeRankings, setArcadeRankings] = useState<LeaderboardEntry[]>([]);
+    const [careerRankings, setCareerRankings] = useState<LeaderboardEntry[]>([]);
+    const [leaderboardLoading, setLeaderboardLoading] = useState(false);
+    const [showTagPrompt, setShowTagPrompt] = useState(false);
+    const [tagInput, setTagInput] = useState('');
+    const [leaderboardSubmitting, setLeaderboardSubmitting] = useState(false);
+
+    useEffect(() => {
+        try {
+            localStorage.setItem('chain_reaction_pilot_tag_v3', pilotTag);
+        } catch (e) {
+            console.error(e);
+        }
+    }, [pilotTag]);
+
+    useEffect(() => {
+        try {
+            localStorage.setItem('chain_reaction_run_score_v3', runScore.toString());
+        } catch (e) {
+            console.error(e);
+        }
+    }, [runScore]);
+
+    useEffect(() => {
+        try {
+            localStorage.setItem('chain_reaction_career_submitted_v3', careerScoreSubmitted.toString());
+        } catch (e) {
+            console.error(e);
+        }
+    }, [careerScoreSubmitted]);
+
+    const fetchRankings = async () => {
+        setLeaderboardLoading(true);
+        try {
+            const arcade = await getTopRankings('arcade');
+            const career = await getTopRankings('career');
+            setArcadeRankings(arcade);
+            setCareerRankings(career);
+        } catch (e) {
+            console.error('Error fetching rankings:', e);
+        } finally {
+            setLeaderboardLoading(false);
+        }
+    };
 
     const addFloatNotif = (text: string) => {
         const id = Date.now() + Math.random();
@@ -563,7 +634,6 @@ export default function App() {
             playNearMissAlert();
             setEarnedShardStats(null);
             setConsolationShardsAwarded(null);
-            setScreen('ROUND_OVER');
             return;
         }
 
@@ -586,12 +656,14 @@ export default function App() {
             const comboBonusPerHit = 5 + (upgrades.comboShardMultiplier || 0) * 4;
             const shardComboValue = stats.maxCombo * comboBonusPerHit;
             const darkMatterBonus = (stats.darkMatterCleared || 0) * 10;
-            const shardTotalGained = shardBase + shardPerfectValue + shardComboValue + darkMatterBonus;
+            const sparksBonus = (stats.sparksLeft || 0) * 50;
+            const shardTotalGained = shardBase + shardPerfectValue + shardComboValue + darkMatterBonus + sparksBonus;
 
             setEarnedShardStats({
                 base: shardBase,
                 perfect: shardPerfectValue,
                 combo: shardComboValue,
+                sparksBonus: sparksBonus,
                 darkMatter: darkMatterBonus,
                 total: shardTotalGained
             });
@@ -602,12 +674,29 @@ export default function App() {
             setSlotPayoutMessage("🎰 CLICK 'PULL LEVER' FOR CASCADE MULTIPLIER! 🎰");
             setShowPayoutBanner(false);
 
-            // Save standard score
+            // Save standard score and accumulate single run score
+            let scoreGain = stats.cleared * 100 + stats.maxCombo * 50;
+            if (perfect) {
+                scoreGain += 2500;
+            }
+            setRunScore(prev => prev + scoreGain);
+            
+            // Check and auto-submit to career standings if pilotTag exists and new score is higher
+            const nextTotalScore = totalScore + scoreGain;
+            if (pilotTag && pilotTag.trim().length === 3 && nextTotalScore > careerScoreSubmitted) {
+                submitRanking({
+                    player_tag: pilotTag.toUpperCase(),
+                    score: nextTotalScore,
+                    highest_sector: level,
+                    type: 'career'
+                }).then(success => {
+                    if (success) {
+                        setCareerScoreSubmitted(nextTotalScore);
+                    }
+                });
+            }
+
             setTotalScore(prev => {
-                let scoreGain = stats.cleared * 100 + stats.maxCombo * 50;
-                if (perfect) {
-                    scoreGain += 2500;
-                }
                 const nextScore = prev + scoreGain;
                 if (nextScore > highScore) {
                     setHighScore(nextScore);
@@ -895,6 +984,7 @@ export default function App() {
             // Retain the current level for retrying!
             setTotalScore(0);
             setPeakCombo(0);
+            setRunScore(0); // Reset runScore for the new run!
         } else if (screen === 'ROUND_OVER' && didWinLast) {
             setLevel(l => l + 1);
         }
@@ -998,6 +1088,9 @@ export default function App() {
                 localStorage.removeItem('chain_reaction_clear_streak_v3');
                 localStorage.removeItem('chain_reaction_level_scores_v3');
                 localStorage.removeItem('chain_reaction_level_v3');
+                localStorage.removeItem('chain_reaction_run_score_v3');
+                localStorage.removeItem('chain_reaction_pilot_tag_v3');
+                localStorage.removeItem('chain_reaction_career_submitted_v3');
             } catch (e) {
                 console.error(e);
             }
@@ -1023,6 +1116,9 @@ export default function App() {
             setLevelHighScores({});
             setTotalScore(0);
             setPeakCombo(0);
+            setRunScore(0);
+            setPilotTag('');
+            setCareerScoreSubmitted(0);
             
             addFloatNotif("REACTOR DATABASES DECLASSIFIED & RESET!");
         }
@@ -1215,7 +1311,7 @@ export default function App() {
                                     {tutorialCompleted && (
                                         <button 
                                             onClick={() => {
-                                                setShopReferrer('START');
+                                                setPrestigeShopReferrer('START');
                                                 setScreen('PRESTIGE_SHOP');
                                             }}
                                             className="w-full bg-gradient-to-r from-purple-600 to-fuchsia-600 text-white py-4 rounded-xl font-black text-base flex items-center justify-center gap-2 hover:scale-105 active:scale-95 transition-all shadow-[0_0_20px_rgba(168,85,247,0.25)] cursor-pointer"
@@ -1306,12 +1402,12 @@ export default function App() {
 
                 {/* QUANTUM PRESTIGE SHOP SCREEN */}
                 {screen === 'PRESTIGE_SHOP' && (
-                    <div className="absolute inset-0 flex flex-col p-6 z-40 bg-[#0c0c0e]/98 overflow-y-auto pt-10 select-none scrollbar-none">
+                    <div className="absolute inset-0 flex flex-col p-6 pb-2 z-40 bg-[#0c0c0e]/98 select-none overflow-hidden">
                         
                         {/* Catalysts tracker Header */}
-                        <div className="flex items-center justify-between mb-4 pb-3 border-b border-zinc-800">
+                        <div className="flex items-center justify-between pb-3 border-b border-zinc-800 bg-[#0c0c0e]/98 z-50 pt-4 flex-shrink-0">
                             <button 
-                                onClick={() => setScreen(shopReferrer)}
+                                onClick={() => setScreen(prestigeShopReferrer)}
                                 className="flex items-center gap-1 text-zinc-400 hover:text-white transition-colors text-xs font-bold uppercase tracking-wider cursor-pointer"
                             >
                                 <ChevronLeft className="w-4 h-4 text-purple-400" />
@@ -1320,7 +1416,6 @@ export default function App() {
 
                             <button 
                                 onClick={() => {
-                                    setShopReferrer('PRESTIGE_SHOP');
                                     setScreen('SHOP');
                                 }}
                                 className="flex items-center gap-1 text-yellow-400 hover:text-yellow-300 transition-colors text-[9px] font-bold uppercase tracking-wider cursor-pointer bg-yellow-950/20 border border-yellow-500/20 px-2 py-0.5 rounded-lg"
@@ -1333,114 +1428,117 @@ export default function App() {
                             </div>
                         </div>
 
-                        <div className="mb-4">
-                            <h2 className="text-xl font-black italic text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-fuchsia-400 uppercase tracking-tighter leading-none mb-1">
-                                ANOMALY RESEARCH
-                            </h2>
-                            <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider">
-                                PERMANENT PRESTIGE UPGRADES
-                            </p>
-                        </div>
+                        {/* Scrollable list content */}
+                        <div className="flex-1 overflow-y-auto pt-4 scrollbar-none pb-4">
+                            <div className="mb-4">
+                                <h2 className="text-xl font-black italic text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-fuchsia-400 uppercase tracking-tighter leading-none mb-1">
+                                    ANOMALY RESEARCH
+                                </h2>
+                                <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider">
+                                    PERMANENT PRESTIGE UPGRADES
+                                </p>
+                            </div>
 
-                        {/* PRESTIGE UPGRADES LIST */}
-                        <div className="space-y-3 mb-6">
-                            {[
-                                {
-                                    id: 'catalystCore',
-                                    name: 'Quantum Catalyst Core',
-                                    description: 'Boosts trigger spark expansion radius by +15% per tier (multiplicative).',
-                                    icon: Sparkles,
-                                    color: '#d946ef',
-                                    getLabel: (lvl) => `+${Math.round((Math.pow(1.15, lvl) - 1) * 100)}% Spark Radius`
-                                },
-                                {
-                                    id: 'tractorPulsar',
-                                    name: 'Pulsar Tractor Beam',
-                                    description: 'Boosts magnetic sweeper herding pull force by +20% per tier (multiplicative).',
-                                    icon: Magnet,
-                                    color: '#a855f7',
-                                    getLabel: (lvl) => `+${Math.round((Math.pow(1.20, lvl) - 1) * 100)}% Pull Force`
-                                },
-                                {
-                                    id: 'gridEfficiency',
-                                    name: 'Grid Core Efficiency',
-                                    description: 'Reduces standard upgrade costs by 12% per tier (multiplicative).',
-                                    icon: Cpu,
-                                    color: '#818cf8',
-                                    getLabel: (lvl) => `-${Math.round((1 - Math.pow(0.88, lvl)) * 100)}% Cost Reduction`
-                                },
-                                {
-                                    id: 'darkMatterConversion',
-                                    name: 'Dark Matter Transmuter',
-                                    description: 'Grants a +10% chance per tier for atoms to spawn as radioactive Dark Matter. Clearing them awards +10 bonus shards directly (bypassing multipliers).',
-                                    icon: Atom,
-                                    color: '#c084fc',
-                                    getLabel: (lvl) => `${lvl * 10}% Spawn Chance`
-                                }
-                            ].map((pItem) => {
-                                const currentLvl = (prestigeUpgrades)[pItem.id] || 0;
-                                const cost = 1;
-                                const currentLvlLabel = pItem.getLabel(currentLvl);
+                            {/* PRESTIGE UPGRADES LIST */}
+                            <div className="space-y-3 mb-6">
+                                {[
+                                    {
+                                        id: 'catalystCore',
+                                        name: 'Quantum Catalyst Core',
+                                        description: 'Boosts trigger spark expansion radius by +15% per tier (multiplicative).',
+                                        icon: Sparkles,
+                                        color: '#d946ef',
+                                        getLabel: (lvl) => `+${Math.round((Math.pow(1.15, lvl) - 1) * 100)}% Spark Radius`
+                                    },
+                                    {
+                                        id: 'tractorPulsar',
+                                        name: 'Pulsar Tractor Beam',
+                                        description: 'Boosts magnetic sweeper herding pull force by +20% per tier (multiplicative).',
+                                        icon: Magnet,
+                                        color: '#a855f7',
+                                        getLabel: (lvl) => `+${Math.round((Math.pow(1.20, lvl) - 1) * 100)}% Pull Force`
+                                    },
+                                    {
+                                        id: 'gridEfficiency',
+                                        name: 'Grid Core Efficiency',
+                                        description: 'Reduces standard upgrade costs by 12% per tier (multiplicative).',
+                                        icon: Cpu,
+                                        color: '#818cf8',
+                                        getLabel: (lvl) => `-${Math.round((1 - Math.pow(0.88, lvl)) * 100)}% Cost Reduction`
+                                    },
+                                    {
+                                        id: 'darkMatterConversion',
+                                        name: 'Dark Matter Transmuter',
+                                        description: 'Grants a +10% chance per tier for atoms to spawn as radioactive Dark Matter. Clearing them awards +10 bonus shards directly (bypassing multipliers).',
+                                        icon: Atom,
+                                        color: '#c084fc',
+                                        getLabel: (lvl) => `${lvl * 10}% Spawn Chance`
+                                    }
+                                ].map((pItem) => {
+                                    const currentLvl = (prestigeUpgrades)[pItem.id] || 0;
+                                    const cost = 1;
+                                    const currentLvlLabel = pItem.getLabel(currentLvl);
 
-                                return (
-                                    <div key={pItem.id} className="p-3.5 rounded-2xl bg-white/5 border border-purple-500/10 flex flex-col gap-2 shadow-[0_0_15px_rgba(168,85,247,0.03)] text-left">
-                                        <div className="flex items-start justify-between gap-2">
-                                            <div className="flex items-center gap-3">
-                                                <div className="p-1.5 rounded-lg bg-zinc-800 border border-zinc-700 flex-shrink-0" style={{ color: pItem.color }}>
-                                                    <pItem.icon className="w-4 h-4" style={{ fill: pItem.color }} />
-                                                </div>
-                                                <div>
-                                                    <h3 className="font-bold text-xs text-white uppercase tracking-tight flex items-center gap-1.5">
-                                                        {pItem.name}
-                                                        <span className="text-[9px] px-1.5 py-0.5 rounded bg-purple-500/10 text-purple-400 border border-purple-500/20 font-mono font-bold leading-none">
-                                                            Tier {currentLvl}
-                                                        </span>
-                                                    </h3>
-                                                    <p className="text-[10px] text-zinc-400 leading-tight max-w-[190px]">{pItem.description}</p>
+                                    return (
+                                        <div key={pItem.id} className="p-3.5 rounded-2xl bg-white/5 border border-purple-500/10 flex flex-col gap-2 shadow-[0_0_15px_rgba(168,85,247,0.03)] text-left">
+                                            <div className="flex items-start justify-between gap-2">
+                                                <div className="flex items-center gap-3">
+                                                    <div className="p-1.5 rounded-lg bg-zinc-800 border border-zinc-700 flex-shrink-0" style={{ color: pItem.color }}>
+                                                        <pItem.icon className="w-4 h-4" style={{ fill: pItem.color }} />
+                                                    </div>
+                                                    <div>
+                                                        <h3 className="font-bold text-xs text-white uppercase tracking-tight flex items-center gap-1.5">
+                                                            {pItem.name}
+                                                            <span className="text-[9px] px-1.5 py-0.5 rounded bg-purple-500/10 text-purple-400 border border-purple-500/20 font-mono font-bold leading-none">
+                                                                Tier {currentLvl}
+                                                            </span>
+                                                        </h3>
+                                                        <p className="text-[10px] text-zinc-400 leading-tight max-w-[190px]">{pItem.description}</p>
+                                                    </div>
                                                 </div>
                                             </div>
-                                        </div>
 
-                                        <div className="flex items-center justify-between mt-1 pt-2 border-t border-white/10 gap-2">
-                                            <span className="text-[10px] font-mono font-bold text-zinc-500">{currentLvlLabel}</span>
-                                            
-                                            <button
-                                                onClick={() => {
-                                                    if (darkMatter >= cost) {
-                                                        setDarkMatter(dm => dm - cost);
-                                                        setPrestigeUpgrades(prev => ({
-                                                            ...prev,
-                                                            [pItem.id]: currentLvl + 1
-                                                        }));
-                                                        playPurchaseConfirm();
-                                                        addFloatNotif(`Purchased ${pItem.name} Tier ${currentLvl + 1}!`);
-                                                    } else {
-                                                        addFloatNotif("Insufficient Dark Matter Catalysts!");
-                                                    }
-                                                }}
-                                                disabled={darkMatter < cost}
-                                                className={`px-3 py-1.5 rounded-lg text-[9px] font-black tracking-wider uppercase transition-all flex items-center gap-1 cursor-pointer ${
-                                                    darkMatter >= cost
-                                                        ? 'bg-purple-500 text-white shadow-[0_0_10px_rgba(168,85,247,0.3)] hover:scale-105 active:scale-95 font-bold'
-                                                        : 'bg-zinc-800 border border-zinc-700 text-zinc-400 cursor-not-allowed shadow-none'
-                                                }`}
-                                            >
-                                                Spend 1 🧪
-                                            </button>
+                                            <div className="flex items-center justify-between mt-1 pt-2 border-t border-white/10 gap-2">
+                                                <span className="text-[10px] font-mono font-bold text-zinc-500">{currentLvlLabel}</span>
+                                                
+                                                <button
+                                                    onClick={() => {
+                                                        if (darkMatter >= cost) {
+                                                            setDarkMatter(dm => dm - cost);
+                                                            setPrestigeUpgrades(prev => ({
+                                                                ...prev,
+                                                                [pItem.id]: currentLvl + 1
+                                                            }));
+                                                            playPurchaseConfirm();
+                                                            addFloatNotif(`Purchased ${pItem.name} Tier ${currentLvl + 1}!`);
+                                                        } else {
+                                                            addFloatNotif("Insufficient Dark Matter Catalysts!");
+                                                        }
+                                                    }}
+                                                    disabled={darkMatter < cost}
+                                                    className={`px-3 py-1.5 rounded-lg text-[9px] font-black tracking-wider uppercase transition-all flex items-center gap-1 cursor-pointer ${
+                                                        darkMatter >= cost
+                                                            ? 'bg-purple-500 text-white shadow-[0_0_10px_rgba(168,85,247,0.3)] hover:scale-105 active:scale-95 font-bold'
+                                                            : 'bg-zinc-800 border border-zinc-700 text-zinc-400 cursor-not-allowed shadow-none'
+                                                    }`}
+                                                >
+                                                    Spend 1 🧪
+                                                </button>
+                                            </div>
                                         </div>
-                                    </div>
-                                );
-                            })}
+                                    );
+                                })}
+                            </div>
                         </div>
                     </div>
                 )}
 
                 {/* SHOP SCREEN */}
                 {screen === 'SHOP' && (
-                    <div className="absolute inset-0 flex flex-col p-6 z-40 bg-[#0c0c0e]/98 overflow-y-auto pt-10 select-none scrollbar-none">
+                    <div className="absolute inset-0 flex flex-col p-6 pb-2 z-40 bg-[#0c0c0e]/98 select-none overflow-hidden">
                         
                         {/* Shards tracker Header */}
-                        <div className="flex items-center justify-between mb-4 pb-3 border-b border-zinc-800">
+                        <div className="flex items-center justify-between pb-3 border-b border-zinc-800 bg-[#0c0c0e] z-50 pt-4 flex-shrink-0">
                             <button 
                                 onClick={() => setScreen(shopReferrer)}
                                 className="flex items-center gap-1 text-zinc-400 hover:text-white transition-colors text-xs font-bold uppercase tracking-wider cursor-pointer"
@@ -1451,7 +1549,7 @@ export default function App() {
                             
                             <button 
                                 onClick={() => {
-                                    setShopReferrer('SHOP');
+                                    setPrestigeShopReferrer('SHOP');
                                     setScreen('PRESTIGE_SHOP');
                                 }}
                                 className="flex items-center gap-1 text-purple-400 hover:text-purple-300 transition-colors text-[9px] font-bold uppercase tracking-wider cursor-pointer bg-purple-950/20 border border-purple-500/20 px-2 py-0.5 rounded-lg"
@@ -1465,202 +1563,205 @@ export default function App() {
                             </div>
                         </div>
 
-                        <div className="mb-4">
-                            <h2 className="text-xl font-black italic text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 to-amber-400 uppercase tracking-tighter leading-none mb-1">
-                                QUANTUM RESEARCH
-                            </h2>
-                            <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider">
-                                UPGRADE POWER-UPS & STYLES
-                            </p>
-                        </div>
+                        {/* Scrollable list content */}
+                        <div className="flex-1 overflow-y-auto pt-4 scrollbar-none pb-4">
+                            <div className="mb-4">
+                                <h2 className="text-xl font-black italic text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 to-amber-400 uppercase tracking-tighter leading-none mb-1">
+                                    QUANTUM RESEARCH
+                                </h2>
+                                <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider">
+                                    UPGRADE POWER-UPS & STYLES
+                                </p>
+                            </div>
 
-                        {/* UPGRADES MODULES LIST */}
-                        <div className="space-y-3 mb-6">
-                            {SHOP_ITEMS.map((item) => {
-                                const currentLvl = upgrades[item.id] || 0;
-                                const isTutorialGift = !tutorialCompleted && tutorialStep === 4 && item.id === 'sparkRadiusBoost';
-                                const discount = Math.pow(0.88, prestigeUpgrades.gridEfficiency || 0);
-                                const cost = isTutorialGift ? 0 : Math.round(item.baseCost * Math.pow(item.multiplier, currentLvl) * discount);
-                                const currentLvlLabel = item.getValueLabel(currentLvl);
+                            {/* UPGRADES MODULES LIST */}
+                            <div className="space-y-3 mb-6">
+                                {SHOP_ITEMS.map((item) => {
+                                    const currentLvl = upgrades[item.id] || 0;
+                                    const isTutorialGift = !tutorialCompleted && tutorialStep === 4 && item.id === 'sparkRadiusBoost';
+                                    const discount = Math.pow(0.88, prestigeUpgrades.gridEfficiency || 0);
+                                    const cost = isTutorialGift ? 0 : Math.round(item.baseCost * Math.pow(item.multiplier, currentLvl) * discount);
+                                    const currentLvlLabel = item.getValueLabel(currentLvl);
 
-                                const isMaxed = 
-                                    (item.id === 'extraSparks' && currentLvl >= 7) ||
-                                    (item.id === 'specialSpawnRate' && currentLvl >= 10) ||
-                                    (item.id === 'decayResist' && currentLvl >= 8) ||
-                                    (item.id === 'magnetAutopilot' && currentLvl >= 10);
+                                    const isMaxed = 
+                                        (item.id === 'extraSparks' && currentLvl >= 7) ||
+                                        (item.id === 'specialSpawnRate' && currentLvl >= 10) ||
+                                        (item.id === 'decayResist' && currentLvl >= 8) ||
+                                        (item.id === 'magnetAutopilot' && currentLvl >= 10);
 
-                                // Icon pairing matcher
-                                 const IconComp = 
-                                     item.id === 'extraSparks' ? Zap : 
-                                     item.id === 'maxMagnetFuel' ? Gauge : 
-                                     item.id === 'sparkRadiusBoost' ? Sparkles : 
-                                     item.id === 'magnetPower' ? Magnet :
-                                     item.id === 'specialSpawnRate' ? Flame :
-                                     item.id === 'resonanceDuration' ? Flame :
-                                     item.id === 'decayResist' ? Shield :
-                                     item.id === 'comboShardMultiplier' ? Coins : Cpu; 
+                                    // Icon pairing matcher
+                                     const IconComp = 
+                                         item.id === 'extraSparks' ? Zap : 
+                                         item.id === 'maxMagnetFuel' ? Gauge : 
+                                         item.id === 'sparkRadiusBoost' ? Sparkles : 
+                                         item.id === 'magnetPower' ? Magnet :
+                                         item.id === 'specialSpawnRate' ? Flame :
+                                         item.id === 'resonanceDuration' ? Flame :
+                                         item.id === 'decayResist' ? Shield :
+                                         item.id === 'comboShardMultiplier' ? Coins : Cpu; 
 
-                                return (
-                                    <div 
-                                        key={item.id} 
-                                        className={`p-3.5 rounded-2xl bg-white/5 border flex flex-col gap-2 transition-all relative ${
-                                            isTutorialGift 
-                                                ? 'border-purple-500/80 bg-purple-950/20 shadow-[0_0_20px_rgba(168,85,247,0.25)] ring-2 ring-purple-500/50' 
-                                                : 'border-white/5'
-                                        }`}
-                                    >
-                                        <div className="flex items-start justify-between gap-2">
-                                            <div className="flex items-center gap-3">
-                                                <div className="p-1.5 rounded-lg bg-zinc-800 text-cyan-400 border border-zinc-700 flex-shrink-0">
-                                                    <IconComp className="w-4 h-4 text-cyan-400 fill-cyan-400" />
-                                                </div>
-                                                <div>
-                                                    <h3 className="font-bold text-xs text-white uppercase tracking-tight flex items-center gap-1.5">
-                                                        {item.name}
-                                                        <span className="text-[9px] px-1.5 py-0.5 rounded bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 font-mono font-bold leading-none">
-                                                            Tier {currentLvl}
-                                                        </span>
-                                                    </h3>
-                                                    <p className="text-[10px] text-zinc-400 leading-tight max-w-[190px]">{item.description}</p>
+                                    return (
+                                        <div 
+                                            key={item.id} 
+                                            className={`p-3.5 rounded-2xl bg-white/5 border flex flex-col gap-2 transition-all relative ${
+                                                isTutorialGift 
+                                                    ? 'border-purple-500/80 bg-purple-950/20 shadow-[0_0_20px_rgba(168,85,247,0.25)] ring-2 ring-purple-500/50' 
+                                                    : 'border-white/5'
+                                            }`}
+                                        >
+                                            <div className="flex items-start justify-between gap-2">
+                                                <div className="flex items-center gap-3">
+                                                    <div className="p-1.5 rounded-lg bg-zinc-800 text-cyan-400 border border-zinc-700 flex-shrink-0">
+                                                        <IconComp className="w-4 h-4 text-cyan-400 fill-cyan-400" />
+                                                    </div>
+                                                    <div>
+                                                        <h3 className="font-bold text-xs text-white uppercase tracking-tight flex items-center gap-1.5">
+                                                            {item.name}
+                                                            <span className="text-[9px] px-1.5 py-0.5 rounded bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 font-mono font-bold leading-none">
+                                                                Tier {currentLvl}
+                                                            </span>
+                                                        </h3>
+                                                        <p className="text-[10px] text-zinc-400 leading-tight max-w-[190px]">{item.description}</p>
+                                                    </div>
                                                 </div>
                                             </div>
-                                        </div>
 
-                                        <div className="flex items-center justify-between mt-1 pt-2 border-t border-white/10 gap-2">
-                                            <span className="text-[10px] font-mono font-bold text-zinc-500">{currentLvlLabel}</span>
-                                            
-                                            {isMaxed ? (
-                                                <span className="px-2.5 py-1 text-[9px] font-black text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded-lg tracking-widest uppercase">
-                                                    MAX LEVEL
-                                                </span>
-                                            ) : (
-                                                <div className="flex items-center gap-2">
-                                                    {isTutorialGift && (
-                                                        <div className="flex items-center gap-1.5 animate-bounce-finger-left">
-                                                            <span className="text-xl">👉</span>
-                                                        </div>
-                                                    )}
+                                            <div className="flex items-center justify-between mt-1 pt-2 border-t border-white/10 gap-2">
+                                                <span className="text-[10px] font-mono font-bold text-zinc-500">{currentLvlLabel}</span>
+                                                
+                                                {isMaxed ? (
+                                                    <span className="px-2.5 py-1 text-[9px] font-black text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded-lg tracking-widest uppercase">
+                                                        MAX LEVEL
+                                                    </span>
+                                                ) : (
+                                                    <div className="flex items-center gap-2">
+                                                        {isTutorialGift && (
+                                                            <div className="flex items-center gap-1.5 animate-bounce-finger-left">
+                                                                <span className="text-xl">👉</span>
+                                                            </div>
+                                                        )}
+                                                        <button
+                                                            onClick={() => {
+                                                                if (isTutorialGift) {
+                                                                    setUpgrades(prev => ({
+                                                                        ...prev,
+                                                                        sparkRadiusBoost: 1
+                                                                    }));
+                                                                    setTutorialCompleted(true);
+                                                                    setTutorialStep(5);
+                                                                    setLevel(1);
+                                                                    playPurchaseSound();
+                                                                    addFloatNotif("Catalyst Core Active! Reactor Initialized!");
+                                                                    setScreen('START');
+                                                                    return;
+                                                                }
+                                                                if (shards >= cost) {
+                                                                    setShards(s => s - cost);
+                                                                    setUpgrades(prev => ({
+                                                                        ...prev,
+                                                                        [item.id]: currentLvl + 1
+                                                                    }));
+                                                                    playPurchaseSound();
+                                                                    addFloatNotif(`Purchased ${item.name} Tier ${currentLvl + 1}!`);
+                                                                } else {
+                                                                    setMonetizationReason({
+                                                                        item: `${item.name} Tier ${currentLvl + 1}`,
+                                                                        shortage: cost - shards
+                                                                    });
+                                                                    setMonetizationOpen(true);
+                                                                }
+                                                            }}
+                                                            className={`px-3 py-1.5 rounded-lg text-[9px] font-black tracking-wider uppercase transition-all flex items-center gap-1 cursor-pointer ${
+                                                                isTutorialGift
+                                                                    ? 'bg-gradient-to-r from-purple-500 to-fuchsia-500 text-white shadow-[0_0_15px_rgba(168,85,247,0.5)] border border-purple-400 hover:scale-105 active:scale-95 font-bold animate-pulse-ring'
+                                                                    : shards >= cost
+                                                                        ? 'bg-yellow-400 text-black shadow-[0_0_10px_rgba(250,204,21,0.2)] hover:scale-105 active:scale-95 font-bold'
+                                                                        : 'bg-zinc-800 border border-zinc-700 text-zinc-400 hover:bg-zinc-755 hover:text-yellow-400 hover:scale-105 active:scale-95 shadow-[0_0_10px_rgba(250,204,21,0.05)]'
+                                                            }`}
+                                                        >
+                                                            {isTutorialGift ? '🎁 FREE GIFT' : `${cost} ⚡`}
+                                                        </button>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+
+                            {/* PARTICLE THEMES SHOP MODULE */}
+                            <div className="mb-2">
+                                <h2 className="text-sm font-black italic text-cyan-400 uppercase tracking-tight leading-none mb-0.5">
+                                    GLOW MATRIX CORE DECODES
+                                </h2>
+                                <p className="text-[9px] text-zinc-500 font-bold uppercase tracking-wider mb-2">
+                                    EXCHANGE CELLS FOR THEMED PARTICLE CODES
+                                </p>
+                            </div>
+
+                            <div className="space-y-3 mb-6">
+                                {THEME_SHOP_ITEMS.map((themeItem) => {
+                                    const isUnlocked = purchasedThemes.includes(themeItem.id);
+                                    const isActive = activeTheme === themeItem.id;
+
+                                    return (
+                                        <div key={themeItem.id} className="p-3.5 rounded-2xl bg-white/5 border border-white/5 flex flex-col gap-2">
+                                            <div className="flex items-center justify-between gap-2">
+                                                <div>
+                                                    <h3 className="font-bold text-xs text-white uppercase tracking-tight">{themeItem.name}</h3>
+                                                    <p className="text-[10px] text-zinc-400 leading-tight max-w-[190px]">{themeItem.description}</p>
+                                                </div>
+                                                <div className="flex gap-1 p-1 bg-zinc-950/80 rounded-lg border border-zinc-800 flex-shrink-0">
+                                                    {themeItem.colors.map((color, cIdx) => (
+                                                        <div 
+                                                            key={cIdx} 
+                                                            className="w-3.5 h-3.5 rounded-full shadow-sm"
+                                                            style={{ backgroundColor: color, boxShadow: `0 0 6px ${color}50` }}
+                                                        />
+                                                    ))}
+                                                </div>
+                                            </div>
+
+                                            <div className="flex items-center justify-end pt-2 border-t border-white/10 mt-1">
+                                                {isActive ? (
+                                                    <span className="px-3 py-1 bg-cyan-500/10 border border-cyan-400/25 rounded-lg text-cyan-400 text-[10px] font-black tracking-wider uppercase flex items-center gap-1 font-bold">
+                                                        <Check className="w-3.5 h-3.5 text-cyan-400" /> ACTIVE
+                                                    </span>
+                                                ) : isUnlocked ? (
                                                     <button
                                                         onClick={() => {
-                                                            if (isTutorialGift) {
-                                                                setUpgrades(prev => ({
-                                                                    ...prev,
-                                                                    sparkRadiusBoost: 1
-                                                                }));
-                                                                setTutorialCompleted(true);
-                                                                setTutorialStep(5);
-                                                                setLevel(1);
-                                                                playPurchaseSound();
-                                                                addFloatNotif("Catalyst Core Active! Reactor Initialized!");
-                                                                setScreen('START');
-                                                                return;
-                                                            }
-                                                            if (shards >= cost) {
-                                                                setShards(s => s - cost);
-                                                                setUpgrades(prev => ({
-                                                                    ...prev,
-                                                                    [item.id]: currentLvl + 1
-                                                                }));
-                                                                playPurchaseSound();
-                                                                addFloatNotif(`Purchased ${item.name} Tier ${currentLvl + 1}!`);
-                                                            } else {
-                                                                setMonetizationReason({
-                                                                    item: `${item.name} Tier ${currentLvl + 1}`,
-                                                                    shortage: cost - shards
-                                                                });
-                                                                setMonetizationOpen(true);
-                                                            }
-                                                        }}
-                                                        className={`px-3 py-1.5 rounded-lg text-[9px] font-black tracking-wider uppercase transition-all flex items-center gap-1 cursor-pointer ${
-                                                            isTutorialGift
-                                                                ? 'bg-gradient-to-r from-purple-500 to-fuchsia-500 text-white shadow-[0_0_15px_rgba(168,85,247,0.5)] border border-purple-400 hover:scale-105 active:scale-95 font-bold animate-pulse-ring'
-                                                                : shards >= cost
-                                                                    ? 'bg-yellow-400 text-black shadow-[0_0_10px_rgba(250,204,21,0.2)] hover:scale-105 active:scale-95 font-bold'
-                                                                    : 'bg-zinc-800 border border-zinc-700 text-zinc-400 hover:bg-zinc-755 hover:text-yellow-400 hover:scale-105 active:scale-95 shadow-[0_0_10px_rgba(250,204,21,0.05)]'
-                                                        }`}
-                                                    >
-                                                        {isTutorialGift ? '🎁 FREE GIFT' : `${cost} ⚡`}
-                                                    </button>
-                                                </div>
-                                            )}
-                                        </div>
-                                    </div>
-                                );
-                            })}
-                        </div>
-
-                        {/* PARTICLE THEMES SHOP MODULE */}
-                        <div className="mb-2">
-                            <h2 className="text-sm font-black italic text-cyan-400 uppercase tracking-tight leading-none mb-0.5">
-                                GLOW MATRIX CORE DECODES
-                            </h2>
-                            <p className="text-[9px] text-zinc-500 font-bold uppercase tracking-wider mb-2">
-                                EXCHANGE CELLS FOR THEMED PARTICLE CODES
-                            </p>
-                        </div>
-
-                        <div className="space-y-3 mb-6">
-                            {THEME_SHOP_ITEMS.map((themeItem) => {
-                                const isUnlocked = purchasedThemes.includes(themeItem.id);
-                                const isActive = activeTheme === themeItem.id;
-
-                                return (
-                                    <div key={themeItem.id} className="p-3.5 rounded-2xl bg-white/5 border border-white/5 flex flex-col gap-2">
-                                        <div className="flex items-center justify-between gap-2">
-                                            <div>
-                                                <h3 className="font-bold text-xs text-white uppercase tracking-tight">{themeItem.name}</h3>
-                                                <p className="text-[10px] text-zinc-400 leading-tight max-w-[190px]">{themeItem.description}</p>
-                                            </div>
-                                            <div className="flex gap-1 p-1 bg-zinc-950/80 rounded-lg border border-zinc-800 flex-shrink-0">
-                                                {themeItem.colors.map((color, cIdx) => (
-                                                    <div 
-                                                        key={cIdx} 
-                                                        className="w-3.5 h-3.5 rounded-full shadow-sm"
-                                                        style={{ backgroundColor: color, boxShadow: `0 0 6px ${color}50` }}
-                                                    />
-                                                ))}
-                                            </div>
-                                        </div>
-
-                                        <div className="flex items-center justify-end pt-2 border-t border-white/10 mt-1">
-                                            {isActive ? (
-                                                <span className="px-3 py-1 bg-cyan-500/10 border border-cyan-400/25 rounded-lg text-cyan-400 text-[10px] font-black tracking-wider uppercase flex items-center gap-1 font-bold">
-                                                    <Check className="w-3.5 h-3.5 text-cyan-400" /> ACTIVE
-                                                </span>
-                                            ) : isUnlocked ? (
-                                                <button
-                                                    onClick={() => {
-                                                        setActiveTheme(themeItem.id);
-                                                        playPurchaseSound();
-                                                    }}
-                                                    className="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 border border-zinc-700 rounded-lg text-[9px] font-black tracking-wider uppercase transition-all hover:scale-103 cursor-pointer"
-                                                >
-                                                    ENGAGE
-                                                </button>
-                                            ) : (
-                                                <button
-                                                    onClick={() => {
-                                                        if (shards >= themeItem.cost) {
-                                                            setShards(s => s - themeItem.cost);
-                                                            setPurchasedThemes(prev => [...prev, themeItem.id]);
                                                             setActiveTheme(themeItem.id);
                                                             playPurchaseSound();
-                                                        }
-                                                    }}
-                                                    disabled={shards < themeItem.cost}
-                                                    className={`px-3 py-1.5 rounded-lg text-[9px] font-black tracking-wider uppercase transition-all ${
-                                                        shards >= themeItem.cost
-                                                            ? 'bg-yellow-400 text-black shadow-[0_0_10px_rgba(250,204,21,0.2)] hover:scale-105 active:scale-95 cursor-pointer font-bold'
-                                                            : 'bg-zinc-800 text-zinc-500 border border-zinc-700 cursor-not-allowed'
-                                                    }`}
-                                                >
-                                                    UNLOCK ({themeItem.cost} ⚡)
-                                                </button>
-                                            )}
+                                                        }}
+                                                        className="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 border border-zinc-700 rounded-lg text-[9px] font-black tracking-wider uppercase transition-all hover:scale-103 cursor-pointer"
+                                                    >
+                                                        ENGAGE
+                                                    </button>
+                                                ) : (
+                                                    <button
+                                                        onClick={() => {
+                                                            if (shards >= themeItem.cost) {
+                                                                setShards(s => s - themeItem.cost);
+                                                                setPurchasedThemes(prev => [...prev, themeItem.id]);
+                                                                setActiveTheme(themeItem.id);
+                                                                playPurchaseSound();
+                                                            }
+                                                        }}
+                                                        disabled={shards < themeItem.cost}
+                                                        className={`px-3 py-1.5 rounded-lg text-[9px] font-black tracking-wider uppercase transition-all ${
+                                                            shards >= themeItem.cost
+                                                                ? 'bg-yellow-400 text-black shadow-[0_0_10px_rgba(250,204,21,0.2)] hover:scale-105 active:scale-95 cursor-pointer font-bold'
+                                                                : 'bg-zinc-800 text-zinc-500 border border-zinc-700 cursor-not-allowed'
+                                                        }`}
+                                                    >
+                                                        UNLOCK ({themeItem.cost} ⚡)
+                                                    </button>
+                                                )}
+                                            </div>
                                         </div>
-                                    </div>
-                                );
-                            })}
+                                    );
+                                })}
+                            </div>
                         </div>
                     </div>
                 )}
@@ -1869,6 +1970,13 @@ export default function App() {
                             {/* Shards status and buy decision */}
                             <div className="w-full space-y-2.5 mb-2">
                                 <button 
+                                    onClick={forfeitNearMissRound}
+                                    className="w-full bg-zinc-800/40 hover:bg-zinc-800 text-zinc-400 py-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2 border border-zinc-700/80 active:scale-95 transition-all cursor-pointer uppercase tracking-wider"
+                                >
+                                    💔 FORFEIT SWEEP & EXTRACT CONSOLATION CORES
+                                </button>
+
+                                <button 
                                     onClick={buySecondChanceSpark}
                                     disabled={shards < 50 * (nearMissSparksPurchased + 1)}
                                     className={`w-full py-4 rounded-xl font-extrabold text-sm flex flex-col items-center justify-center gap-0.5 transition-all shadow-[0_0_20px_rgba(239,68,68,0.15)] ${
@@ -1883,13 +1991,6 @@ export default function App() {
                                     <span className="text-[10px] font-bold opacity-80">
                                         Cost: {50 * (nearMissSparksPurchased + 1)} ⚡ (Your Shards: {shards} ⚡)
                                     </span>
-                                </button>
-
-                                <button 
-                                    onClick={forfeitNearMissRound}
-                                    className="w-full bg-zinc-800/40 hover:bg-zinc-800 text-zinc-400 py-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2 border border-zinc-700/80 active:scale-95 transition-all cursor-pointer uppercase tracking-wider"
-                                >
-                                    💔 FORFEIT SWEEP & EXTRACT CONSOLATION CORES
                                 </button>
                             </div>
                         </div>
@@ -1988,6 +2089,13 @@ export default function App() {
                                 {/* Shards status and buy decision */}
                                 <div className="w-full space-y-2.5 mb-2">
                                     <button 
+                                        onClick={forfeitNearMissRound}
+                                        className="w-full bg-zinc-800/40 hover:bg-zinc-800 text-zinc-400 py-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2 border border-zinc-700/80 active:scale-95 transition-all cursor-pointer uppercase tracking-wider"
+                                    >
+                                        💔 FORFEIT SWEEP & EXTRACT CONSOLATION CORES
+                                    </button>
+
+                                    <button 
                                         onClick={buySecondChanceSpark}
                                         disabled={shards < 50 * (nearMissSparksPurchased + 1)}
                                         className={`w-full py-4 rounded-xl font-extrabold text-sm flex flex-col items-center justify-center gap-0.5 transition-all shadow-[0_0_20px_rgba(239,68,68,0.15)] ${
@@ -2002,13 +2110,6 @@ export default function App() {
                                         <span className="text-[10px] font-bold opacity-80">
                                             Cost: {50 * (nearMissSparksPurchased + 1)} ⚡ (Your Shards: {shards} ⚡)
                                         </span>
-                                    </button>
-
-                                    <button 
-                                        onClick={forfeitNearMissRound}
-                                        className="w-full bg-zinc-800/40 hover:bg-zinc-800 text-zinc-400 py-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2 border border-zinc-700/80 active:scale-95 transition-all cursor-pointer uppercase tracking-wider"
-                                    >
-                                        💔 FORFEIT SWEEP & EXTRACT CONSOLATION CORES
                                     </button>
                                 </div>
                             </div>
@@ -2158,9 +2259,15 @@ export default function App() {
                                             </p>
                                             
                                             <div className="flex justify-between items-center text-[10px] font-mono border-t border-zinc-900 pt-2 text-zinc-400">
-                                                <span>Sector Base:</span>
-                                                <span className="text-zinc-200">+{earnedShardStats.total} ⚡</span>
+                                                <span>Sector Base Yield:</span>
+                                                <span className="text-zinc-200">+{earnedShardStats.total - (earnedShardStats.sparksBonus || 0)} ⚡</span>
                                             </div>
+                                            {earnedShardStats.sparksBonus ? (
+                                                <div className="flex justify-between items-center text-[10px] font-mono text-zinc-400">
+                                                    <span>Leftover Sparks Bonus (+50 ⚡/spark):</span>
+                                                    <span className="text-emerald-400 font-bold">+{earnedShardStats.sparksBonus} ⚡</span>
+                                                </div>
+                                            ) : null}
                                             {earnedShardStats.darkMatter ? (
                                                 <div className="flex justify-between items-center text-[10px] font-mono text-zinc-400">
                                                     <span>Dark Matter Transmuted:</span>
@@ -2205,6 +2312,59 @@ export default function App() {
                                         </p>
                                     </div>
                                 )}
+
+                                {/* REACTOR ANOMALY PROGRESS TRACKER ON RESULTS */}
+                                <div className="w-full bg-[#111114]/90 border border-zinc-900 rounded-2xl p-4 text-left space-y-3 mb-4 select-none font-sans">
+                                    <div className="flex items-center justify-between">
+                                        <span className="text-[10px] font-black uppercase text-cyan-400 tracking-wider flex items-center gap-1.5 font-mono">
+                                            <Cpu className="w-3.5 h-3.5 text-cyan-400 animate-pulse animate-duration-2000" /> REACTOR ANOMALY SCANNER
+                                        </span>
+                                        <span className="text-[9px] font-mono text-zinc-500 uppercase">Sector {level}</span>
+                                    </div>
+                                    
+                                    <div className="space-y-2">
+                                        {/* Progress bar track */}
+                                        <div className="relative w-full h-1.5 bg-zinc-950 rounded-full overflow-hidden border border-zinc-900/60">
+                                            <div 
+                                                className="h-full bg-gradient-to-r from-cyan-400 via-fuchsia-500 to-purple-500 shadow-[0_0_10px_rgba(168,85,247,0.3)] transition-all duration-500"
+                                                style={{ width: `${Math.min(100, Math.max(5, (level / 35) * 100))}%` }}
+                                            />
+                                        </div>
+                                        
+                                        {/* Hazard Nodes Grid */}
+                                        <div className="grid grid-cols-4 gap-1.5 pt-1.5">
+                                            {[
+                                                { lvl: 2, icon: '🧬', name: 'Decay Cell', desc: 'Resists herding and snuffs out active explosions.' },
+                                                { lvl: 3, icon: '🌪️', name: 'Void Anomaly', desc: 'Pulls atoms in and swallows detonator sparks.' },
+                                                { lvl: 20, icon: '💥', name: 'Quantum Pulsar', desc: 'Pulsates EM disruption to repel particles and damp explosions.' },
+                                                { lvl: 35, icon: '⚛️', name: 'Resonance Dampener', desc: 'Magenta collapsing nodes & gravity event horizons.' }
+                                            ].map((hz) => {
+                                                const unlocked = level >= hz.lvl;
+                                                return (
+                                                    <div 
+                                                        key={hz.lvl}
+                                                        title={unlocked ? hz.desc : `Classified anomaly signature detected. Unlock requirements: Sector ${hz.lvl}`}
+                                                        className={`p-2 rounded-xl border flex flex-col items-center text-center transition-all duration-300 ${
+                                                            unlocked 
+                                                                ? 'bg-zinc-900/20 border-cyan-500/20 text-zinc-300 shadow-[0_0_8px_rgba(34,211,238,0.02)]' 
+                                                                : 'bg-black/20 border-zinc-900/60 text-zinc-600'
+                                                        }`}
+                                                    >
+                                                        <span className={`text-sm mb-1 select-none transition-transform duration-300 hover:scale-110 ${unlocked ? 'filter drop-shadow-[0_0_4px_rgba(34,211,238,0.35)]' : 'opacity-25 grayscale'}`}>
+                                                            {unlocked ? hz.icon : '🔒'}
+                                                        </span>
+                                                        <span className={`block text-[7px] font-mono font-black uppercase tracking-wider leading-none ${unlocked ? 'text-zinc-400' : 'text-zinc-650'}`}>
+                                                            SEC {hz.lvl}
+                                                        </span>
+                                                        <span className={`block text-[8px] font-black leading-tight truncate w-full mt-1.5 uppercase tracking-wide font-sans ${unlocked ? 'text-cyan-400' : 'text-zinc-650 font-bold'}`}>
+                                                            {unlocked ? hz.name.split(' ')[0] : 'SECRET'}
+                                                        </span>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+                                </div>
 
                                 <div className="flex flex-col w-full gap-2.5 mb-4">
                                     {didWinLast && level >= 50 && slotHasSpun ? (
@@ -2514,6 +2674,91 @@ export default function App() {
                         )}
                     </div>
                 )}
+
+                {/* CELEBRATORY SECTOR RETIREMENT OVERLAY */}
+                {showPrestigeOverlay && (
+                    <div className="absolute inset-0 z-50 flex flex-col items-center justify-center p-6 text-center bg-black/95 backdrop-blur-xl select-none overflow-y-auto">
+                        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,rgba(168,85,247,0.15),transparent_70%)] pointer-events-none animate-pulse"></div>
+                        
+                        <div className="mb-4 inline-flex items-center justify-center p-4 bg-purple-950/40 border border-purple-500/40 rounded-full animate-bounce shadow-[0_0_25px_rgba(168,85,247,0.4)]">
+                            <Atom className="w-12 h-12 text-purple-400 animate-spin" />
+                        </div>
+                        
+                        <div className="mb-2 inline-flex items-center gap-1.5 px-3 py-1 bg-purple-500/10 border border-purple-500/30 rounded-full text-purple-400 font-extrabold text-[10px] uppercase tracking-widest animate-pulse">
+                            🌟 CONSTELLATION CONQUERED 🌟
+                        </div>
+
+                        <h2 className="text-3xl font-black italic tracking-tighter uppercase leading-none mb-2 text-transparent bg-clip-text bg-gradient-to-r from-purple-400 via-fuchsia-500 to-indigo-400 drop-shadow-[0_0_20px_rgba(168,85,247,0.5)]">
+                            SECTOR RETIREMENT
+                        </h2>
+                        
+                        <p className="text-zinc-400 text-xs font-bold leading-relaxed max-w-[280px] mb-6">
+                            Excellent work, Commander! You have conquered the grid limits of <span className="text-white font-extrabold">Sector 50</span>. The reactor requires reset to synthesize dark matter.
+                        </p>
+
+                        {/* Career Stats summary */}
+                        <div className="p-4 w-full bg-purple-950/10 border border-purple-500/20 rounded-2xl mb-6 text-left space-y-2">
+                            <div className="text-center font-black tracking-widest text-[9px] uppercase text-purple-400 mb-1 border-b border-purple-500/20 pb-1">
+                                REACTOR CAREER SUMMARY
+                            </div>
+                            <div className="flex justify-between text-xs text-zinc-300 font-bold">
+                                <span>MAX SECTOR REACHED:</span>
+                                <span className="text-white">Sector 50</span>
+                            </div>
+                            <div className="flex justify-between text-xs text-zinc-300 font-bold">
+                                <span>PEAK REACTION COMBO:</span>
+                                <span className="text-yellow-400 font-mono">{peakCombo}x</span>
+                            </div>
+                            <div className="flex justify-between text-xs text-zinc-300 font-bold">
+                                <span>DARK MATTER REWARD:</span>
+                                <span className="text-purple-400 font-extrabold flex items-center gap-1">
+                                    +1 🧪 CATALYST
+                                </span>
+                            </div>
+                        </div>
+
+                        {/* Decisions */}
+                        <div className="w-full space-y-2.5">
+                            <button 
+                                onClick={() => {
+                                    // Reset standard progress:
+                                    setLevel(1);
+                                    setUpgrades({ 
+                                        extraSparks: 0, 
+                                        maxMagnetFuel: 0, 
+                                        magnetPower: 0, 
+                                        sparkRadiusBoost: 0, 
+                                        specialSpawnRate: 0, 
+                                        resonanceDuration: 0, 
+                                        decayResist: 0, 
+                                        comboShardMultiplier: 0, 
+                                        magnetAutopilot: 0 
+                                    });
+                                    setShards(30);
+                                    setDarkMatter(dm => dm + 1);
+                                    setShowPrestigeOverlay(false);
+                                    setScreen('START');
+                                    playTransactionChord();
+                                }}
+                                className="w-full py-4 rounded-xl font-black text-sm flex flex-col items-center justify-center gap-0.5 bg-gradient-to-r from-purple-500 to-indigo-655 hover:scale-103 active:scale-97 text-white cursor-pointer shadow-[0_0_25px_rgba(168,85,247,0.35)]"
+                            >
+                                <span className="flex items-center gap-1 uppercase tracking-wider text-xs font-black">
+                                    🌌 RETIRE SECTOR & RESET PROGRESS
+                                </span>
+                                <span className="text-[9px] font-bold opacity-80 uppercase tracking-widest">
+                                    RESETS SHARDS TO 30 & UPGRADES TO TIER 0
+                                </span>
+                            </button>
+
+                            <button 
+                                onClick={() => setShowPrestigeOverlay(false)}
+                                className="w-full bg-zinc-900/40 hover:bg-zinc-800 text-zinc-400 py-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2 border border-zinc-800 active:scale-95 transition-all cursor-pointer uppercase tracking-wider"
+                            >
+                                🪐 STAY IN SECTOR 50 FOR NOW
+                            </button>
+                        </div>
+                    </div>
+                )}
             </div>
 
             {/* Right Column: Dynamic Tactical Manual explaining elements */}
@@ -2619,90 +2864,7 @@ export default function App() {
                     </div>
 
 
-                {/* CELEBRATORY SECTOR RETIREMENT OVERLAY */}
-                {showPrestigeOverlay && (
-                    <div className="absolute inset-0 z-50 flex flex-col items-center justify-center p-6 text-center bg-black/95 backdrop-blur-xl select-none overflow-y-auto">
-                        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,rgba(168,85,247,0.15),transparent_70%)] pointer-events-none animate-pulse"></div>
-                        
-                        <div className="mb-4 inline-flex items-center justify-center p-4 bg-purple-950/40 border border-purple-500/40 rounded-full animate-bounce shadow-[0_0_25px_rgba(168,85,247,0.4)]">
-                            <Atom className="w-12 h-12 text-purple-400 animate-spin" />
-                        </div>
-                        
-                        <div className="mb-2 inline-flex items-center gap-1.5 px-3 py-1 bg-purple-500/10 border border-purple-500/30 rounded-full text-purple-400 font-extrabold text-[10px] uppercase tracking-widest animate-pulse">
-                            🌟 CONSTELLATION CONQUERED 🌟
-                        </div>
-
-                        <h2 className="text-3xl font-black italic tracking-tighter uppercase leading-none mb-2 text-transparent bg-clip-text bg-gradient-to-r from-purple-400 via-fuchsia-500 to-indigo-400 drop-shadow-[0_0_20px_rgba(168,85,247,0.5)]">
-                            SECTOR RETIREMENT
-                        </h2>
-                        
-                        <p className="text-zinc-400 text-xs font-bold leading-relaxed max-w-[280px] mb-6">
-                            Excellent work, Commander! You have conquered the grid limits of <span className="text-white font-extrabold">Sector 50</span>. The reactor requires reset to synthesize dark matter.
-                        </p>
-
-                        {/* Career Stats summary */}
-                        <div className="p-4 w-full bg-purple-950/10 border border-purple-500/20 rounded-2xl mb-6 text-left space-y-2">
-                            <div className="text-center font-black tracking-widest text-[9px] uppercase text-purple-400 mb-1 border-b border-purple-500/20 pb-1">
-                                REACTOR CAREER SUMMARY
-                            </div>
-                            <div className="flex justify-between text-xs text-zinc-300 font-bold">
-                                <span>MAX SECTOR REACHED:</span>
-                                <span className="text-white">Sector 50</span>
-                            </div>
-                            <div className="flex justify-between text-xs text-zinc-300 font-bold">
-                                <span>PEAK REACTION COMBO:</span>
-                                <span className="text-yellow-400 font-mono">{peakCombo}x</span>
-                            </div>
-                            <div className="flex justify-between text-xs text-zinc-300 font-bold">
-                                <span>DARK MATTER REWARD:</span>
-                                <span className="text-purple-400 font-extrabold flex items-center gap-1">
-                                    +1 🧪 CATALYST
-                                </span>
-                            </div>
-                        </div>
-
-                        {/* Decisions */}
-                        <div className="w-full space-y-2.5">
-                            <button 
-                                onClick={() => {
-                                    // Reset standard progress:
-                                    setLevel(1);
-                                    setUpgrades({ 
-                                        extraSparks: 0, 
-                                        maxMagnetFuel: 0, 
-                                        magnetPower: 0, 
-                                        sparkRadiusBoost: 0, 
-                                        specialSpawnRate: 0, 
-                                        resonanceDuration: 0, 
-                                        decayResist: 0, 
-                                        comboShardMultiplier: 0, 
-                                        magnetAutopilot: 0 
-                                    });
-                                    setShards(30);
-                                    setDarkMatter(dm => dm + 1);
-                                    setShowPrestigeOverlay(false);
-                                    setScreen('START');
-                                    playTransactionChord();
-                                }}
-                                className="w-full py-4 rounded-xl font-black text-sm flex flex-col items-center justify-center gap-0.5 bg-gradient-to-r from-purple-500 to-indigo-650 hover:scale-103 active:scale-97 text-white cursor-pointer shadow-[0_0_25px_rgba(168,85,247,0.35)]"
-                            >
-                                <span className="flex items-center gap-1 uppercase tracking-wider text-xs font-black">
-                                    🌌 RETIRE SECTOR & RESET PROGRESS
-                                </span>
-                                <span className="text-[9px] font-bold opacity-80 uppercase tracking-widest">
-                                    RESETS SHARDS TO 30 & UPGRADES TO TIER 0
-                                </span>
-                            </button>
-
-                            <button 
-                                onClick={() => setShowPrestigeOverlay(false)}
-                                className="w-full bg-zinc-900/40 hover:bg-zinc-800 text-zinc-400 py-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2 border border-zinc-800 active:scale-95 transition-all cursor-pointer uppercase tracking-wider"
-                            >
-                                🪐 STAY IN SECTOR 50 FOR NOW
-                            </button>
-                        </div>
-                    </div>
-                )}                </div>
+                </div>
             </div>
 
         </div>

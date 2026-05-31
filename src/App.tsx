@@ -379,6 +379,7 @@ export default function App() {
     const [showTagPrompt, setShowTagPrompt] = useState(false);
     const [tagInput, setTagInput] = useState('');
     const [leaderboardSubmitting, setLeaderboardSubmitting] = useState(false);
+    const [prestigePending, setPrestigePending] = useState(false);
 
     useEffect(() => {
         try {
@@ -424,6 +425,30 @@ export default function App() {
         setTimeout(() => {
             setFloatNotifs(prev => prev.filter(n => n.id !== id));
         }, 3000);
+    };
+
+    const handleSkipTagPrompt = () => {
+        setRunScore(0);
+        setShowTagPrompt(false);
+        if (prestigePending) {
+            setLevel(1);
+            setUpgrades({ 
+                extraSparks: 0, 
+                maxMagnetFuel: 0, 
+                magnetPower: 0, 
+                sparkRadiusBoost: 0, 
+                specialSpawnRate: 0, 
+                resonanceDuration: 0, 
+                decayResist: 0, 
+                comboShardMultiplier: 0, 
+                magnetAutopilot: 0 
+            });
+            setShards(30);
+            setDarkMatter(dm => dm + 1);
+            setScreen('START');
+            setPrestigePending(false);
+            playTransactionChord();
+        }
     };
 
     // DECOUPLED AD SDK INTERCONNECT PROTOCOL
@@ -723,6 +748,11 @@ export default function App() {
             setConsolationShardsAwarded(consolationReward);
             setShards(prev => prev + consolationReward);
             playDefeatSound(); // Play soft dissonant/minor descending defeat arpeggio!
+
+            if (runScore > 0) {
+                setShowTagPrompt(true);
+                setTagInput(pilotTag || '');
+            }
         }
         setScreen('ROUND_OVER');
     };
@@ -940,6 +970,10 @@ export default function App() {
             playDefeatSound(); // Play defeat arpeggio
         }
         setScreen('ROUND_OVER');
+        if (runScore > 0) {
+            setShowTagPrompt(true);
+            setTagInput(pilotTag || '');
+        }
     };
 
     const pauseGame = () => {
@@ -1329,6 +1363,18 @@ export default function App() {
                             >
                                 <HelpCircle className="w-4 h-4" />
                                 {showHelp ? 'HIDE SCI-OPS MANUAL' : 'VIEW SCI-OPS MANUAL'}
+                            </button>
+
+                            <button 
+                                onClick={() => {
+                                    playAlertBeep();
+                                    fetchRankings();
+                                    setIsLeaderboardOpen(true);
+                                }}
+                                className="w-full bg-[#111114] border border-cyan-500/20 text-cyan-400 hover:bg-cyan-950/20 py-3 rounded-xl text-sm font-black flex items-center justify-center gap-1.5 active:scale-98 transition-all cursor-pointer shadow-[0_0_15px_rgba(6,182,212,0.05)]"
+                            >
+                                <Trophy className="w-4 h-4 text-cyan-400 animate-pulse" />
+                                🏆 COMMAND LEADERBOARDS
                             </button>
                         </div>
 
@@ -2366,6 +2412,33 @@ export default function App() {
                                     </div>
                                 </div>
 
+                                {!didWinLast && runScore > 0 && (
+                                    <div className="w-full p-4 mb-4 bg-cyan-950/20 border border-cyan-500/20 rounded-2xl text-left shadow-[0_0_15px_rgba(6,182,212,0.05)]">
+                                        <div className="flex items-center justify-between mb-2">
+                                            <span className="text-[10px] font-black uppercase text-cyan-400 tracking-wider flex items-center gap-1">
+                                                🏆 UNTRANSMITTED RUN RECORD
+                                            </span>
+                                            <span className="text-xs font-mono font-black text-cyan-400 bg-cyan-950 px-2 py-0.5 border border-cyan-800 rounded-lg">
+                                                {runScore.toLocaleString()} PTS
+                                            </span>
+                                        </div>
+                                        <p className="text-zinc-400 text-[10px] font-medium leading-normal mb-3">
+                                            Your stellar reactor run has ended, but your record can still be preserved in the global archives. Enter your pilot tag now!
+                                        </p>
+                                        <button
+                                            onClick={() => {
+                                                playAlertBeep();
+                                                setTagInput(pilotTag || '');
+                                                setShowTagPrompt(true);
+                                            }}
+                                            className="w-full py-2.5 bg-cyan-500/10 border border-cyan-500/30 hover:bg-cyan-500/20 text-cyan-400 font-black text-xs uppercase tracking-wider rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 active:scale-97"
+                                        >
+                                            <Trophy className="w-3.5 h-3.5 animate-pulse" />
+                                            TRANSMIT RUN RECORD
+                                        </button>
+                                    </div>
+                                )}
+
                                 <div className="flex flex-col w-full gap-2.5 mb-4">
                                     {didWinLast && level >= 50 && slotHasSpun ? (
                                         <button 
@@ -2721,24 +2794,32 @@ export default function App() {
                         <div className="w-full space-y-2.5">
                             <button 
                                 onClick={() => {
-                                    // Reset standard progress:
-                                    setLevel(1);
-                                    setUpgrades({ 
-                                        extraSparks: 0, 
-                                        maxMagnetFuel: 0, 
-                                        magnetPower: 0, 
-                                        sparkRadiusBoost: 0, 
-                                        specialSpawnRate: 0, 
-                                        resonanceDuration: 0, 
-                                        decayResist: 0, 
-                                        comboShardMultiplier: 0, 
-                                        magnetAutopilot: 0 
-                                    });
-                                    setShards(30);
-                                    setDarkMatter(dm => dm + 1);
-                                    setShowPrestigeOverlay(false);
-                                    setScreen('START');
-                                    playTransactionChord();
+                                    if (runScore > 0) {
+                                        setPrestigePending(true);
+                                        setShowTagPrompt(true);
+                                        setTagInput(pilotTag || '');
+                                        setShowPrestigeOverlay(false);
+                                        playAlertBeep();
+                                    } else {
+                                        // Reset standard progress:
+                                        setLevel(1);
+                                        setUpgrades({ 
+                                            extraSparks: 0, 
+                                            maxMagnetFuel: 0, 
+                                            magnetPower: 0, 
+                                            sparkRadiusBoost: 0, 
+                                            specialSpawnRate: 0, 
+                                            resonanceDuration: 0, 
+                                            decayResist: 0, 
+                                            comboShardMultiplier: 0, 
+                                            magnetAutopilot: 0 
+                                        });
+                                        setShards(30);
+                                        setDarkMatter(dm => dm + 1);
+                                        setShowPrestigeOverlay(false);
+                                        setScreen('START');
+                                        playTransactionChord();
+                                    }
                                 }}
                                 className="w-full py-4 rounded-xl font-black text-sm flex flex-col items-center justify-center gap-0.5 bg-gradient-to-r from-purple-500 to-indigo-655 hover:scale-103 active:scale-97 text-white cursor-pointer shadow-[0_0_25px_rgba(168,85,247,0.35)]"
                             >
@@ -2755,6 +2836,414 @@ export default function App() {
                                 className="w-full bg-zinc-900/40 hover:bg-zinc-800 text-zinc-400 py-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2 border border-zinc-800 active:scale-95 transition-all cursor-pointer uppercase tracking-wider"
                             >
                                 🪐 STAY IN SECTOR 50 FOR NOW
+                            </button>
+                        </div>
+                    </div>
+                )}
+
+                {/* 🏆 VIRTUAL ARCADE PILOT TAG SUBMISSION DIALOG */}
+                {showTagPrompt && (
+                    <div className="absolute inset-0 z-50 flex flex-col items-center justify-center p-6 text-center bg-black/95 backdrop-blur-xl select-none overflow-y-auto">
+                        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,rgba(6,182,212,0.15),transparent_70%)] pointer-events-none animate-pulse"></div>
+                        
+                        <div className="mb-4 inline-flex items-center justify-center p-4 bg-cyan-950/40 border border-cyan-500/40 rounded-full shadow-[0_0_25px_rgba(6,182,212,0.4)] animate-bounce">
+                            <Trophy className="w-12 h-12 text-cyan-400" />
+                        </div>
+                        
+                        <div className="mb-2 inline-flex items-center gap-1.5 px-3 py-1 bg-cyan-500/10 border border-cyan-500/30 rounded-full text-cyan-400 font-extrabold text-[10px] uppercase tracking-widest animate-pulse">
+                            🏆 TRANSMIT ARCADE RUN RECORD 🏆
+                        </div>
+
+                        <h2 className="text-3xl font-black italic tracking-tighter uppercase leading-none mb-2 text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-teal-400 to-indigo-400 drop-shadow-[0_0_20px_rgba(6,182,212,0.5)]">
+                            RECORD SCORE
+                        </h2>
+                        
+                        <p className="text-zinc-400 text-xs font-bold leading-relaxed max-w-[280px] mb-4">
+                            Select or type exactly <span className="text-white font-extrabold">3 characters</span> to submit your run score of <span className="text-cyan-400 font-extrabold font-mono">{runScore.toLocaleString()}</span>.
+                        </p>
+
+                        {/* Interactive Character Display */}
+                        <div className="flex gap-2.5 mb-5 items-center justify-center">
+                            {Array.from({ length: 3 }).map((_, idx) => {
+                                const char = tagInput[idx] || '';
+                                const isCurrent = idx === Math.min(tagInput.length, 2);
+                                return (
+                                    <div 
+                                        key={idx}
+                                        className={`w-12 h-16 rounded-xl border flex items-center justify-center text-3xl font-black font-mono transition-all duration-200 ${
+                                            char 
+                                                ? 'bg-cyan-950/20 border-cyan-500 text-cyan-400 shadow-[0_0_15px_rgba(6,182,212,0.25)]' 
+                                                : isCurrent 
+                                                    ? 'bg-zinc-900 border-zinc-700 text-zinc-650 animate-pulse'
+                                                    : 'bg-zinc-950/40 border-zinc-900 text-zinc-800'
+                                        }`}
+                                    >
+                                        {char || '_'}
+                                    </div>
+                                );
+                            })}
+                        </div>
+
+                        {/* Futuristic virtual sci-fi keyboard / arcade input */}
+                        <div className="w-full max-w-[320px] bg-zinc-950/60 border border-zinc-900 rounded-2xl p-3 mb-5 space-y-2">
+                            {/* Row 1: Numbers */}
+                            <div className="flex justify-center gap-1">
+                                {['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'].map(k => (
+                                    <button
+                                        key={k}
+                                        onClick={() => {
+                                            playAlertBeep();
+                                            if (tagInput.length < 3) {
+                                                setTagInput(prev => prev + k);
+                                            }
+                                        }}
+                                        className="flex-1 py-2 bg-zinc-900 border border-zinc-850 hover:bg-zinc-800 text-zinc-300 text-xs font-black rounded-lg cursor-pointer transition-all active:scale-90"
+                                    >
+                                        {k}
+                                    </button>
+                                ))}
+                            </div>
+                            {/* Row 2: Q-P */}
+                            <div className="flex justify-center gap-1">
+                                {['Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P'].map(k => (
+                                    <button
+                                        key={k}
+                                        onClick={() => {
+                                            playAlertBeep();
+                                            if (tagInput.length < 3) {
+                                                setTagInput(prev => prev + k);
+                                            }
+                                        }}
+                                        className="flex-1 py-2 bg-zinc-900 border border-zinc-850 hover:bg-zinc-800 text-zinc-300 text-xs font-black rounded-lg cursor-pointer transition-all active:scale-90"
+                                    >
+                                        {k}
+                                    </button>
+                                ))}
+                            </div>
+                            {/* Row 3: A-L */}
+                            <div className="flex justify-center gap-1 px-2">
+                                {['A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L'].map(k => (
+                                    <button
+                                        key={k}
+                                        onClick={() => {
+                                            playAlertBeep();
+                                            if (tagInput.length < 3) {
+                                                setTagInput(prev => prev + k);
+                                            }
+                                        }}
+                                        className="flex-1 py-2 bg-zinc-900 border border-zinc-850 hover:bg-zinc-800 text-zinc-300 text-xs font-black rounded-lg cursor-pointer transition-all active:scale-90"
+                                    >
+                                        {k}
+                                    </button>
+                                ))}
+                            </div>
+                            {/* Row 4: Z-M & Edit functions */}
+                            <div className="flex justify-center gap-1">
+                                <button
+                                    onClick={() => {
+                                        playAlertBeep();
+                                        setTagInput(prev => prev.slice(0, -1));
+                                    }}
+                                    className="px-3 bg-red-950/20 border border-red-900/30 hover:bg-red-950/40 text-red-400 text-xs font-black rounded-lg cursor-pointer transition-all active:scale-90 flex items-center justify-center"
+                                    title="Backspace"
+                                >
+                                    ⌫
+                                </button>
+                                {['Z', 'X', 'C', 'V', 'B', 'N', 'M'].map(k => (
+                                    <button
+                                        key={k}
+                                        onClick={() => {
+                                            playAlertBeep();
+                                            if (tagInput.length < 3) {
+                                                setTagInput(prev => prev + k);
+                                            }
+                                        }}
+                                        className="flex-1 py-2 bg-zinc-900 border border-zinc-850 hover:bg-zinc-800 text-zinc-300 text-xs font-black rounded-lg cursor-pointer transition-all active:scale-90"
+                                    >
+                                        {k}
+                                    </button>
+                                ))}
+                                <button
+                                    onClick={() => {
+                                        playAlertBeep();
+                                        setTagInput('');
+                                    }}
+                                    className="px-3 bg-zinc-900 border border-zinc-805 hover:bg-zinc-850 text-zinc-500 text-xs font-black rounded-lg cursor-pointer transition-all active:scale-90 flex items-center justify-center"
+                                    title="Clear"
+                                >
+                                    CLS
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* Submission Buttons */}
+                        <div className="w-full max-w-[320px] space-y-2">
+                            <button 
+                                onClick={async () => {
+                                    if (tagInput.length !== 3) {
+                                        playAlertBeep();
+                                        addFloatNotif("TAG MUST BE EXACTLY 3 CHARACTERS");
+                                        return;
+                                    }
+                                    playAlertBeep();
+                                    setLeaderboardSubmitting(true);
+                                    try {
+                                        const success = await submitRanking({
+                                            player_tag: tagInput.toUpperCase(),
+                                            score: runScore,
+                                            highest_sector: level,
+                                            type: 'arcade'
+                                        });
+                                        if (success) {
+                                            playTransactionChord(); // Cash chime on success
+                                            setPilotTag(tagInput.toUpperCase());
+                                            setRunScore(0);
+                                            setShowTagPrompt(false);
+                                            addFloatNotif("RUN RECORD TRANSMITTED SUCCESSFULLY!");
+                                            if (prestigePending) {
+                                                setLevel(1);
+                                                setUpgrades({ 
+                                                    extraSparks: 0, 
+                                                    maxMagnetFuel: 0, 
+                                                    magnetPower: 0, 
+                                                    sparkRadiusBoost: 0, 
+                                                    specialSpawnRate: 0, 
+                                                    resonanceDuration: 0, 
+                                                    decayResist: 0, 
+                                                    comboShardMultiplier: 0, 
+                                                    magnetAutopilot: 0 
+                                                });
+                                                setShards(30);
+                                                setDarkMatter(dm => dm + 1);
+                                                setScreen('START');
+                                                setPrestigePending(false);
+                                            } else {
+                                                // Load rankings overlay so they can admire it
+                                                fetchRankings();
+                                                setIsLeaderboardOpen(true);
+                                            }
+                                        } else {
+                                            addFloatNotif("TRANSMISSION ERROR - PLEASE TRY AGAIN");
+                                        }
+                                    } catch (e) {
+                                        console.error(e);
+                                        addFloatNotif("TRANSMISSION OFFLINE");
+                                    } finally {
+                                        setLeaderboardSubmitting(false);
+                                    }
+                                }}
+                                disabled={tagInput.length !== 3 || leaderboardSubmitting}
+                                className={`w-full py-4 rounded-xl font-black text-sm flex items-center justify-center gap-1.5 uppercase transition-all cursor-pointer ${
+                                    tagInput.length === 3 && !leaderboardSubmitting
+                                        ? 'bg-gradient-to-r from-cyan-500 to-indigo-500 hover:scale-103 active:scale-97 text-black shadow-[0_0_20px_rgba(6,182,212,0.3)]'
+                                        : 'bg-zinc-800 text-zinc-550 border border-zinc-850 cursor-not-allowed'
+                                }`}
+                            >
+                                {leaderboardSubmitting ? (
+                                    <span className="flex items-center gap-2">
+                                        <Atom className="w-4 h-4 text-black animate-spin" />
+                                        TRANSMITTING SECURE DATA...
+                                    </span>
+                                ) : (
+                                    <>
+                                        <Check className="w-4 h-4 text-black" />
+                                        TRANSMIT PILOT RECORD
+                                    </>
+                                )}
+                            </button>
+
+                            <button 
+                                onClick={handleSkipTagPrompt}
+                                className="w-full bg-zinc-950 border border-zinc-850 hover:bg-zinc-900 text-zinc-500 py-3 rounded-xl font-bold text-xs uppercase tracking-wider active:scale-95 transition-all cursor-pointer"
+                            >
+                                ❌ FORFEIT TRANSMISSION & ERASE CORE
+                            </button>
+                        </div>
+                    </div>
+                )}
+
+                {/* 🏆 FUTURISTIC HOLOGRAPHIC STANDINGS DECK */}
+                {isLeaderboardOpen && (
+                    <div className="absolute inset-0 z-50 flex flex-col items-center justify-center p-6 bg-black/95 backdrop-blur-xl select-none">
+                        <div className="absolute top-0 right-0 w-48 h-48 bg-cyan-400/5 rounded-full blur-3xl pointer-events-none"></div>
+                        <div className="absolute bottom-0 left-0 w-48 h-48 bg-indigo-500/5 rounded-full blur-3xl pointer-events-none"></div>
+
+                        {/* Top banner / holographic header */}
+                        <div className="w-full max-w-[420px] flex items-center justify-between mb-4 border-b border-zinc-900 pb-3">
+                            <div className="flex items-center gap-2">
+                                <Trophy className="w-5 h-5 text-cyan-400 animate-pulse" />
+                                <h2 className="text-xl font-black italic uppercase tracking-tight text-white leading-none">
+                                    GALACTIC STANDINGS
+                                </h2>
+                            </div>
+                            <button
+                                onClick={() => {
+                                    playAlertBeep();
+                                    setIsLeaderboardOpen(false);
+                                }}
+                                className="w-7 h-7 bg-zinc-900 border border-zinc-850 hover:bg-zinc-800 text-zinc-400 hover:text-white rounded-lg flex items-center justify-center font-bold text-xs cursor-pointer active:scale-90 transition-all"
+                            >
+                                ✕
+                            </button>
+                        </div>
+
+                        {/* Standings Tabs */}
+                        <div className="w-full max-w-[420px] flex gap-2 p-1 bg-zinc-950/80 border border-zinc-900 rounded-xl mb-4">
+                            <button
+                                onClick={() => {
+                                    playAlertBeep();
+                                    setLeaderboardType('arcade');
+                                }}
+                                className={`flex-1 py-2.5 rounded-lg text-xs font-black uppercase tracking-wider flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                                    leaderboardType === 'arcade'
+                                        ? 'bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 shadow-[0_0_12px_rgba(6,182,212,0.1)]'
+                                        : 'text-zinc-500 hover:text-zinc-300'
+                                }`}
+                            >
+                                <Flame className="w-3.5 h-3.5" />
+                                QUANTUM RUN RECORDS
+                            </button>
+                            <button
+                                onClick={() => {
+                                    playAlertBeep();
+                                    setLeaderboardType('career');
+                                }}
+                                className={`flex-1 py-2.5 rounded-lg text-xs font-black uppercase tracking-wider flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                                    leaderboardType === 'career'
+                                        ? 'bg-purple-500/10 border border-purple-500/30 text-purple-400 shadow-[0_0_12px_rgba(168,85,247,0.1)]'
+                                        : 'text-zinc-500 hover:text-zinc-300'
+                                }`}
+                            >
+                                <Atom className="w-3.5 h-3.5" />
+                                GALACTIC CAREER STANDINGS
+                            </button>
+                        </div>
+
+                        {/* List viewport */}
+                        <div className="w-full max-w-[420px] flex-grow flex flex-col bg-zinc-950/30 border border-zinc-900 rounded-2xl p-4 overflow-hidden relative">
+                            {leaderboardLoading ? (
+                                <div className="absolute inset-0 flex flex-col items-center justify-center gap-2">
+                                    <Atom className="w-8 h-8 text-cyan-400 animate-spin" />
+                                    <span className="text-[10px] font-black uppercase text-cyan-400/80 tracking-widest font-mono">
+                                        SCANNING ARCHIVES...
+                                    </span>
+                                </div>
+                            ) : (
+                                <div className="w-full h-full flex flex-col">
+                                    <div className="overflow-y-auto flex-grow pr-1.5 space-y-1.5 max-h-[300px]">
+                                        <div className="grid grid-cols-12 text-[8px] font-black text-zinc-500 uppercase tracking-widest px-3 py-1 border-b border-zinc-900 mb-2 font-mono">
+                                            <span className="col-span-2">POS</span>
+                                            <span className="col-span-3 text-left">PILOT</span>
+                                            <span className="col-span-3 text-right">SCORE</span>
+                                            <span className="col-span-2 text-right">SECTOR</span>
+                                            <span className="col-span-2 text-right">DATE</span>
+                                        </div>
+
+                                        {/* Dynamic content */}
+                                        {((leaderboardType === 'arcade' ? arcadeRankings : careerRankings) || []).length === 0 ? (
+                                            <div className="text-center py-12 text-zinc-600 text-xs font-bold">
+                                                NO BEACON SIGNALS TRANSMITTED YET
+                                            </div>
+                                        ) : (
+                                            ((leaderboardType === 'arcade' ? arcadeRankings : careerRankings) || []).map((entry, idx) => {
+                                                const rank = idx + 1;
+                                                const isSelf = pilotTag && entry.player_tag === pilotTag;
+                                                const medal = rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : null;
+                                                const formattedDate = entry.created_at
+                                                    ? new Date(entry.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }).toUpperCase()
+                                                    : 'N/A';
+
+                                                return (
+                                                    <div
+                                                        key={entry.id || idx}
+                                                        className={`grid grid-cols-12 items-center px-3 py-2.5 rounded-xl border text-xs font-bold transition-all duration-300 font-mono ${
+                                                            isSelf
+                                                                ? leaderboardType === 'arcade'
+                                                                    ? 'bg-cyan-500/5 border-cyan-500/40 text-cyan-300 shadow-[0_0_10px_rgba(6,182,212,0.1)]'
+                                                                    : 'bg-purple-500/5 border-purple-500/40 text-purple-300 shadow-[0_0_10px_rgba(168,85,247,0.1)]'
+                                                                : 'bg-[#0f0f12]/40 border-zinc-900/60 text-zinc-300'
+                                                        }`}
+                                                    >
+                                                        {/* POS */}
+                                                        <span className="col-span-2 flex items-center font-extrabold">
+                                                            {medal ? (
+                                                                <span className="text-base leading-none" title={`Rank ${rank}`}>
+                                                                    {medal}
+                                                                </span>
+                                                            ) : (
+                                                                <span className="text-zinc-500">
+                                                                    {rank < 10 ? `0${rank}` : rank}
+                                                                </span>
+                                                            )}
+                                                        </span>
+
+                                                        {/* PILOT */}
+                                                        <span className={`col-span-3 text-left font-black uppercase tracking-wider ${
+                                                            isSelf ? 'text-white' : 'text-zinc-200'
+                                                        }`}>
+                                                            {entry.player_tag}
+                                                        </span>
+
+                                                        {/* SCORE */}
+                                                        <span className={`col-span-3 text-right font-mono font-black ${
+                                                            isSelf
+                                                                ? 'text-white'
+                                                                : rank === 1
+                                                                    ? 'text-yellow-400'
+                                                                    : 'text-zinc-300'
+                                                        }`}>
+                                                            {entry.score.toLocaleString()}
+                                                        </span>
+
+                                                        {/* SECTOR */}
+                                                        <span className="col-span-2 text-right text-[10px] text-zinc-400 font-extrabold uppercase">
+                                                            SEC {entry.highest_sector}
+                                                        </span>
+
+                                                        {/* DATE */}
+                                                        <span className="col-span-2 text-right text-[9px] text-zinc-500 font-semibold uppercase">
+                                                            {formattedDate}
+                                                        </span>
+                                                    </div>
+                                                );
+                                            })
+                                        )}
+                                    </div>
+                                    
+                                    {/* Personal tag indicator */}
+                                    <div className="mt-4 pt-3 border-t border-zinc-900 flex items-center justify-between text-[10px] font-black uppercase text-zinc-500">
+                                        <span>ACTIVE PILOT SIGNATURE:</span>
+                                        <span className={`font-mono px-2 py-0.5 border rounded-lg ${
+                                            pilotTag
+                                                ? 'border-cyan-500/20 text-cyan-400 bg-cyan-950/10 font-black'
+                                                : 'border-zinc-800 text-zinc-650 bg-zinc-950 font-bold'
+                                        }`}>
+                                            {pilotTag ? `[ ${pilotTag} ]` : 'NONE'}
+                                        </span>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Diagnostic Refresh and Close */}
+                        <div className="w-full max-w-[420px] flex gap-2.5 mt-4">
+                            <button
+                                onClick={() => {
+                                    playAlertBeep();
+                                    fetchRankings();
+                                }}
+                                className="flex-1 py-3 bg-zinc-900 hover:bg-zinc-800 text-zinc-400 font-bold text-xs uppercase rounded-xl border border-zinc-800 cursor-pointer active:scale-95 transition-all text-center flex items-center justify-center gap-1"
+                            >
+                                ⚡ RE-SCAN SIGNALS
+                            </button>
+                            <button
+                                onClick={() => {
+                                    playAlertBeep();
+                                    setIsLeaderboardOpen(false);
+                                }}
+                                className="flex-1 py-3 bg-cyan-500 hover:bg-cyan-400 text-black font-black text-xs uppercase rounded-xl cursor-pointer active:scale-95 transition-all text-center"
+                            >
+                                DISMISS STANDINGS
                             </button>
                         </div>
                     </div>

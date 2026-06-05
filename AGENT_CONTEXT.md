@@ -160,11 +160,13 @@ To maintain access to dashboard exit paths and live shard balances during vertic
 - Wraps all upgrading cards and unlockable themes inside a scrolling `flex-1 overflow-y-auto` view pane, allowing elements to slide underneath the frozen top bar seamlessly.
 
 ### 7. Real-Time Global Leaderboards (Supabase Integration)
-- **Database Backend:** Dedicated Supabase project reference `ycvztrpgihepiwqqzefz` under the **Chain Reaction** organization, operating on publishable anonymous client credentials with public SELECT/INSERT row-level security (RLS) policies.
-- **Quantum Run Records (Arcade Standings):** Displays the top 10 longest successful continuous arcade runs. Submitted at run termination (fails, near-miss forfeit, or active-game forfeit) with a touch-friendly virtual sci-fi keypad prompting for exactly 3 uppercase pilot characters.
+- **Database Backend:** Dedicated Supabase project reference `ycvztrpgihepiwqqzefz` under the **Chain Reaction** organization, operating on publishable anonymous client credentials with public SELECT/INSERT row-level security (RLS) policies. Column `player_tag` supports usernames up to 12 characters.
+- **Quantum Run Records (Arcade Standings):** Displays the top 10 longest successful continuous arcade runs. Submitted at run termination (fails, near-miss forfeit, or active-game forfeit) using a touch-friendly virtual sci-fi keypad or physical keyboard for up to 12 uppercase characters.
+- **Username Persistence & Main Menu Edit:** The pilot tag/username is saved in `localStorage` under `chain_reaction_pilot_tag_v3`. The active username is displayed in the top-right corner of the START screen as a sleek badge with a pencil edit icon (`[ PILOT: name ✏️ ]`) so players can modify it at any time.
+- **Silent Background Submissions:** Once a username is set, subsequent runs submit score updates automatically and silently in the background, displaying a floating success toast (e.g. `📡 RUN RECORD OF 120,000 PTS TRANSMITTED!`) without interrupting the user.
 - **Galactic Career Standings:** Tracks and displays cumulative lifetime career scores silently synced and updated to the database as players earn shards during standard gameplay sweeps.
 - **Prestige Reset Loop Protection:** Automatically intercepts "🌌 RETIRE SECTOR & RESET PROGRESS" requests, prompting players to record their active continuous run scores to the database before executing standard progress resets.
-- **Standings Deck UI Modal:** Renders interactive dual-tab rankings grids with trophy accents (🥇, 🥈, 🥉), short-date formats, active pilot tag signatures, dynamic loader animations, and custom row highlights for the active player.
+- **Standings Deck UI Modal:** Renders interactive dual-tab rankings grids with trophy accents (🥇, 🥈, 🥉), short-date formats, active pilot tag signatures (with responsive truncation to fit longer names safely), dynamic loader animations, and custom row highlights for the active player.
 
 ---
 

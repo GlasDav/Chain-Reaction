@@ -549,6 +549,18 @@ export default function App() {
             } else if (isGlobalTop10) {
                 addFloatNotif(`👑 GLOBAL TOP 10! RUN OF ${score.toLocaleString()} PTS TRANSMITTED!`);
             }
+        } else {
+            // Queue failed score locally
+            const queue = getOfflineQueue();
+            queue.push({
+                player_tag: tag.toUpperCase(),
+                score: score,
+                highest_sector: sector,
+                type: 'arcade',
+                timestamp: Date.now()
+            });
+            saveOfflineQueue(queue);
+            addFloatNotif("📡 OFFLINE - SCORE QUEUED FOR SYNC");
         }
 
         return success;
@@ -878,12 +890,8 @@ export default function App() {
 
             if (runScore > 0) {
                 if (pilotTag && pilotTag.trim().length > 0) {
-                    submitArcadeScore(runScore, pilotTag, level).then(success => {
-                        if (success) {
-                            setRunScore(0);
-                        } else {
-                            addFloatNotif("TRANSMISSION ERROR - RETRYING IN BACKGROUND...");
-                        }
+                    submitArcadeScore(runScore, pilotTag, level).then(() => {
+                        setRunScore(0);
                     });
                 } else {
                     setShowTagPrompt(true);
@@ -1109,10 +1117,8 @@ export default function App() {
         setScreen('ROUND_OVER');
         if (runScore > 0) {
             if (pilotTag && pilotTag.trim().length > 0) {
-                submitArcadeScore(runScore, pilotTag, level).then(success => {
-                    if (success) {
-                        setRunScore(0);
-                    }
+                submitArcadeScore(runScore, pilotTag, level).then(() => {
+                    setRunScore(0);
                 });
             } else {
                 setShowTagPrompt(true);
@@ -2959,32 +2965,28 @@ export default function App() {
                                     if (runScore > 0) {
                                         if (pilotTag && pilotTag.trim().length > 0) {
                                             setLeaderboardSubmitting(true);
-                                            submitArcadeScore(runScore, pilotTag, level).then(success => {
+                                            submitArcadeScore(runScore, pilotTag, level).then(() => {
                                                 setLeaderboardSubmitting(false);
-                                                if (success) {
-                                                    setRunScore(0);
-                                                    
-                                                    // Execute Reset:
-                                                    setLevel(1);
-                                                    setUpgrades({ 
-                                                        extraSparks: 0, 
-                                                        maxMagnetFuel: 0, 
-                                                        magnetPower: 0, 
-                                                        sparkRadiusBoost: 0, 
-                                                        specialSpawnRate: 0, 
-                                                        resonanceDuration: 0, 
-                                                        decayResist: 0, 
-                                                        comboShardMultiplier: 0, 
-                                                        magnetAutopilot: 0 
-                                                    });
-                                                    setShards(30);
-                                                    setDarkMatter(dm => dm + 1);
-                                                    setShowPrestigeOverlay(false);
-                                                    setScreen('START');
-                                                    playTransactionChord();
-                                                } else {
-                                                    addFloatNotif("TRANSMISSION ERROR");
-                                                }
+                                                setRunScore(0);
+                                                
+                                                // Execute Reset:
+                                                setLevel(1);
+                                                setUpgrades({ 
+                                                    extraSparks: 0, 
+                                                    maxMagnetFuel: 0, 
+                                                    magnetPower: 0, 
+                                                    sparkRadiusBoost: 0, 
+                                                    specialSpawnRate: 0, 
+                                                    resonanceDuration: 0, 
+                                                    decayResist: 0, 
+                                                    comboShardMultiplier: 0, 
+                                                    magnetAutopilot: 0 
+                                                });
+                                                setShards(30);
+                                                setDarkMatter(dm => dm + 1);
+                                                setShowPrestigeOverlay(false);
+                                                setScreen('START');
+                                                playTransactionChord();
                                             });
                                         } else {
                                             setPrestigePending(true);
@@ -3170,36 +3172,32 @@ export default function App() {
                                     if (runScore > 0) {
                                         setLeaderboardSubmitting(true);
                                         try {
-                                            const success = await submitArcadeScore(runScore, uppercaseTag, level);
-                                            if (success) {
-                                                playTransactionChord(); // Cash chime on success
-                                                setPilotTag(uppercaseTag);
-                                                setRunScore(0);
-                                                setShowTagPrompt(false);
-                                                if (prestigePending) {
-                                                    setLevel(1);
-                                                    setUpgrades({ 
-                                                        extraSparks: 0, 
-                                                        maxMagnetFuel: 0, 
-                                                        magnetPower: 0, 
-                                                        sparkRadiusBoost: 0, 
-                                                        specialSpawnRate: 0, 
-                                                        resonanceDuration: 0, 
-                                                        decayResist: 0, 
-                                                        comboShardMultiplier: 0, 
-                                                        magnetAutopilot: 0 
-                                                    });
-                                                    setShards(30);
-                                                    setDarkMatter(dm => dm + 1);
-                                                    setScreen('START');
-                                                    setPrestigePending(false);
-                                                } else {
-                                                    // Load rankings overlay so they can admire it
-                                                    fetchRankings();
-                                                    setIsLeaderboardOpen(true);
-                                                }
+                                            await submitArcadeScore(runScore, uppercaseTag, level);
+                                            playTransactionChord(); // Cash chime on success
+                                            setPilotTag(uppercaseTag);
+                                            setRunScore(0);
+                                            setShowTagPrompt(false);
+                                            if (prestigePending) {
+                                                setLevel(1);
+                                                setUpgrades({ 
+                                                    extraSparks: 0, 
+                                                    maxMagnetFuel: 0, 
+                                                    magnetPower: 0, 
+                                                    sparkRadiusBoost: 0, 
+                                                    specialSpawnRate: 0, 
+                                                    resonanceDuration: 0, 
+                                                    decayResist: 0, 
+                                                    comboShardMultiplier: 0, 
+                                                    magnetAutopilot: 0 
+                                                });
+                                                setShards(30);
+                                                setDarkMatter(dm => dm + 1);
+                                                setScreen('START');
+                                                setPrestigePending(false);
                                             } else {
-                                                addFloatNotif("TRANSMISSION ERROR - PLEASE TRY AGAIN");
+                                                // Load rankings overlay so they can admire it
+                                                fetchRankings();
+                                                setIsLeaderboardOpen(true);
                                             }
                                         } catch (e) {
                                             console.error(e);

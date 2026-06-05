@@ -41,8 +41,34 @@ import {
     Pause,
     Volume2,
     VolumeX,
-    Atom
+    Atom,
+    Pencil
 } from 'lucide-react';
+
+interface PendingTransmission {
+    player_tag: string;
+    score: number;
+    highest_sector: number;
+    type: 'arcade' | 'career';
+    timestamp: number;
+}
+
+const getOfflineQueue = (): PendingTransmission[] => {
+    try {
+        const queue = localStorage.getItem('chain_reaction_pending_transmissions_v3');
+        return queue ? JSON.parse(queue) : [];
+    } catch {
+        return [];
+    }
+};
+
+const saveOfflineQueue = (queue: PendingTransmission[]) => {
+    try {
+        localStorage.setItem('chain_reaction_pending_transmissions_v3', JSON.stringify(queue));
+    } catch (e) {
+        console.error(e);
+    }
+};
 
 type Screen = 'START' | 'GAME' | 'ROUND_OVER' | 'SHOP' | 'PRESTIGE_SHOP';
 
@@ -405,6 +431,15 @@ export default function App() {
         }
     }, [careerScoreSubmitted]);
 
+    useEffect(() => {
+        processOfflineQueue();
+
+        window.addEventListener('online', processOfflineQueue);
+        return () => {
+            window.removeEventListener('online', processOfflineQueue);
+        };
+    }, []);
+
     const fetchRankings = async () => {
         setLeaderboardLoading(true);
         try {
@@ -419,12 +454,104 @@ export default function App() {
         }
     };
 
+    // Capture physical keyboard inputs during Pilot Tag signature changes
+    useEffect(() => {
+        if (!showTagPrompt) return;
+        
+        const handleKeyDown = (e: KeyboardEvent) => {
+            const key = e.key.toUpperCase();
+            if (key === 'BACKSPACE') {
+                setTagInput(prev => prev.slice(0, -1));
+            } else if (key === 'ESCAPE') {
+                handleSkipTagPrompt();
+            } else if (key.length === 1 && /^[A-Z0-9_]$/.test(key)) {
+                if (tagInput.length < 12) {
+                    setTagInput(prev => prev + key);
+                }
+            }
+        };
+
+        window.addEventListener('keydown', handleKeyDown);
+        return () => {
+            window.removeEventListener('keydown', handleKeyDown);
+        };
+    }, [showTagPrompt, tagInput]);
+
     const addFloatNotif = (text: string) => {
         const id = Date.now() + Math.random();
         setFloatNotifs(prev => [...prev, { id, text }]);
         setTimeout(() => {
             setFloatNotifs(prev => prev.filter(n => n.id !== id));
         }, 3000);
+    };
+
+    const processOfflineQueue = async () => {
+        const queue = getOfflineQueue();
+        if (queue.length === 0) return;
+
+        const remainingQueue: PendingTransmission[] = [];
+        let processedCount = 0;
+
+        for (const item of queue) {
+            if (processedCount > 0 && remainingQueue.length > 0) {
+                remainingQueue.push(item);
+                continue;
+            }
+
+            try {
+                const success = await submitRanking({
+                    player_tag: item.player_tag,
+                    score: item.score,
+                    highest_sector: item.highest_sector,
+                    type: item.type
+                });
+
+                if (success) {
+                    processedCount++;
+                    addFloatNotif(`📡 SYNCED: ${item.type.toUpperCase()} RECORD OF ${item.score.toLocaleString()} PTS UPLOADED!`);
+                } else {
+                    remainingQueue.push(item);
+                }
+            } catch (e) {
+                console.error('Failed to sync queued item:', e);
+                remainingQueue.push(item);
+            }
+        }
+
+        saveOfflineQueue(remainingQueue);
+    };
+
+    const submitArcadeScore = async (score: number, tag: string, sector: number): Promise<boolean> => {
+        let isGlobalTop10 = false;
+        try {
+            const topRankings = await getTopRankings('arcade');
+            if (topRankings.length < 10 || (topRankings.length > 0 && score > topRankings[topRankings.length - 1].score)) {
+                isGlobalTop10 = true;
+            }
+        } catch (e) {
+            console.error('Error checking global top 10:', e);
+        }
+
+        const isPersonalBest = score >= highScore && score > 0;
+
+        const success = await submitRanking({
+            player_tag: tag.toUpperCase(),
+            score: score,
+            highest_sector: sector,
+            type: 'arcade'
+        });
+
+        if (success) {
+            if (isPersonalBest && isGlobalTop10) {
+                addFloatNotif(`🏆👑 NEW PB & GLOBAL TOP 10! RUN OF ${score.toLocaleString()} PTS TRANSMITTED!`);
+            } else if (isPersonalBest) {
+                addFloatNotif(`🏆 NEW PERSONAL BEST! RUN OF ${score.toLocaleString()} PTS TRANSMITTED!`);
+            } else if (isGlobalTop10) {
+                addFloatNotif(`👑 GLOBAL TOP 10! RUN OF ${score.toLocaleString()} PTS TRANSMITTED!`);
+            }
+        }
+
+        return success;
     };
 
     const handleSkipTagPrompt = () => {
@@ -750,8 +877,18 @@ export default function App() {
             playDefeatSound(); // Play soft dissonant/minor descending defeat arpeggio!
 
             if (runScore > 0) {
-                setShowTagPrompt(true);
-                setTagInput(pilotTag || '');
+                if (pilotTag && pilotTag.trim().length > 0) {
+                    submitArcadeScore(runScore, pilotTag, level).then(success => {
+                        if (success) {
+                            setRunScore(0);
+                        } else {
+                            addFloatNotif("TRANSMISSION ERROR - RETRYING IN BACKGROUND...");
+                        }
+                    });
+                } else {
+                    setShowTagPrompt(true);
+                    setTagInput('');
+                }
             }
         }
         setScreen('ROUND_OVER');
@@ -971,8 +1108,16 @@ export default function App() {
         }
         setScreen('ROUND_OVER');
         if (runScore > 0) {
-            setShowTagPrompt(true);
-            setTagInput(pilotTag || '');
+            if (pilotTag && pilotTag.trim().length > 0) {
+                submitArcadeScore(runScore, pilotTag, level).then(success => {
+                    if (success) {
+                        setRunScore(0);
+                    }
+                });
+            } else {
+                setShowTagPrompt(true);
+                setTagInput('');
+            }
         }
     };
 
@@ -1293,6 +1438,23 @@ export default function App() {
                 {/* START SCREEN */}
                 {screen === 'START' && (
                     <div className="absolute inset-0 flex flex-col items-center justify-center p-8 text-center z-10 bg-[#0c0c0e]/95 backdrop-blur-sm select-none">
+                        {/* Active Pilot Profile Tag (Top-Right) */}
+                        <div className="absolute top-4 right-4 z-20 flex items-center gap-2 px-3.5 py-2 bg-zinc-950/80 border border-zinc-900 hover:border-cyan-500/30 rounded-xl text-[10px] font-black uppercase text-zinc-400 tracking-wider shadow-lg transition-all duration-300">
+                            <span className="text-zinc-500 font-mono">PILOT:</span>
+                            <span className="font-mono text-cyan-400 font-extrabold text-xs">{pilotTag || 'UNASSIGNED'}</span>
+                            <button 
+                                onClick={() => {
+                                    playAlertBeep();
+                                    setTagInput(pilotTag || '');
+                                    setShowTagPrompt(true);
+                                }}
+                                className="w-5 h-5 flex items-center justify-center rounded-lg bg-zinc-900 border border-zinc-800 hover:bg-cyan-500 hover:border-cyan-400 hover:text-black text-zinc-400 transition-all cursor-pointer shadow-sm active:scale-90"
+                                title="Edit Pilot Signature"
+                            >
+                                <Pencil className="w-2.5 h-2.5 animate-pulse" />
+                            </button>
+                        </div>
+
                         <div className="mb-4 inline-flex items-center justify-center bg-cyan-900/20 text-cyan-400 border border-cyan-500/30 p-3 rounded-full animate-pulse shadow-[0_0_15px_rgba(34,211,238,0.2)]">
                             <Magnet className="w-8 h-8 text-cyan-400" />
                         </div>
@@ -2412,7 +2574,7 @@ export default function App() {
                                     </div>
                                 </div>
 
-                                {!didWinLast && runScore > 0 && (
+                                {!didWinLast && runScore > 0 && (!pilotTag || pilotTag.trim().length === 0) && (
                                     <div className="w-full p-4 mb-4 bg-cyan-950/20 border border-cyan-500/20 rounded-2xl text-left shadow-[0_0_15px_rgba(6,182,212,0.05)]">
                                         <div className="flex items-center justify-between mb-2">
                                             <span className="text-[10px] font-black uppercase text-cyan-400 tracking-wider flex items-center gap-1">
@@ -2795,11 +2957,42 @@ export default function App() {
                             <button 
                                 onClick={() => {
                                     if (runScore > 0) {
-                                        setPrestigePending(true);
-                                        setShowTagPrompt(true);
-                                        setTagInput(pilotTag || '');
-                                        setShowPrestigeOverlay(false);
-                                        playAlertBeep();
+                                        if (pilotTag && pilotTag.trim().length > 0) {
+                                            setLeaderboardSubmitting(true);
+                                            submitArcadeScore(runScore, pilotTag, level).then(success => {
+                                                setLeaderboardSubmitting(false);
+                                                if (success) {
+                                                    setRunScore(0);
+                                                    
+                                                    // Execute Reset:
+                                                    setLevel(1);
+                                                    setUpgrades({ 
+                                                        extraSparks: 0, 
+                                                        maxMagnetFuel: 0, 
+                                                        magnetPower: 0, 
+                                                        sparkRadiusBoost: 0, 
+                                                        specialSpawnRate: 0, 
+                                                        resonanceDuration: 0, 
+                                                        decayResist: 0, 
+                                                        comboShardMultiplier: 0, 
+                                                        magnetAutopilot: 0 
+                                                    });
+                                                    setShards(30);
+                                                    setDarkMatter(dm => dm + 1);
+                                                    setShowPrestigeOverlay(false);
+                                                    setScreen('START');
+                                                    playTransactionChord();
+                                                } else {
+                                                    addFloatNotif("TRANSMISSION ERROR");
+                                                }
+                                            });
+                                        } else {
+                                            setPrestigePending(true);
+                                            setShowTagPrompt(true);
+                                            setTagInput('');
+                                            setShowPrestigeOverlay(false);
+                                            playAlertBeep();
+                                        }
                                     } else {
                                         // Reset standard progress:
                                         setLevel(1);
@@ -2851,37 +3044,24 @@ export default function App() {
                         </div>
                         
                         <div className="mb-2 inline-flex items-center gap-1.5 px-3 py-1 bg-cyan-500/10 border border-cyan-500/30 rounded-full text-cyan-400 font-extrabold text-[10px] uppercase tracking-widest animate-pulse">
-                            🏆 TRANSMIT ARCADE RUN RECORD 🏆
+                            🏆 {runScore > 0 ? "TRANSMIT ARCADE RUN RECORD" : "PILOT SIGNATURE DECK"} 🏆
                         </div>
 
                         <h2 className="text-3xl font-black italic tracking-tighter uppercase leading-none mb-2 text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-teal-400 to-indigo-400 drop-shadow-[0_0_20px_rgba(6,182,212,0.5)]">
-                            RECORD SCORE
+                            {runScore > 0 ? "RECORD SCORE" : "EDIT SIGNATURE"}
                         </h2>
                         
                         <p className="text-zinc-400 text-xs font-bold leading-relaxed max-w-[280px] mb-4">
-                            Select or type exactly <span className="text-white font-extrabold">3 characters</span> to submit your run score of <span className="text-cyan-400 font-extrabold font-mono">{runScore.toLocaleString()}</span>.
+                            {runScore > 0 ? (
+                                <>Select or type up to <span className="text-white font-extrabold">12 characters</span> to submit your run score of <span className="text-cyan-400 font-extrabold font-mono">{runScore.toLocaleString()}</span>.</>
+                            ) : (
+                                <>Select or type up to <span className="text-white font-extrabold">12 characters</span> to configure your permanent pilot signature.</>
+                            )}
                         </p>
 
-                        {/* Interactive Character Display */}
-                        <div className="flex gap-2.5 mb-5 items-center justify-center">
-                            {Array.from({ length: 3 }).map((_, idx) => {
-                                const char = tagInput[idx] || '';
-                                const isCurrent = idx === Math.min(tagInput.length, 2);
-                                return (
-                                    <div 
-                                        key={idx}
-                                        className={`w-12 h-16 rounded-xl border flex items-center justify-center text-3xl font-black font-mono transition-all duration-200 ${
-                                            char 
-                                                ? 'bg-cyan-950/20 border-cyan-500 text-cyan-400 shadow-[0_0_15px_rgba(6,182,212,0.25)]' 
-                                                : isCurrent 
-                                                    ? 'bg-zinc-900 border-zinc-700 text-zinc-650 animate-pulse'
-                                                    : 'bg-zinc-950/40 border-zinc-900 text-zinc-800'
-                                        }`}
-                                    >
-                                        {char || '_'}
-                                    </div>
-                                );
-                            })}
+                        {/* High-Tech Single Display Field */}
+                        <div className="w-full max-w-[280px] h-14 rounded-xl border border-cyan-500 bg-cyan-950/20 flex items-center justify-center text-xl font-black font-mono text-cyan-400 tracking-widest shadow-[0_0_15px_rgba(6,182,212,0.25)] mb-5 px-4 uppercase animate-pulse">
+                            {tagInput || 'ENTER PILOT TAG'}
                         </div>
 
                         {/* Futuristic virtual sci-fi keyboard / arcade input */}
@@ -2893,7 +3073,7 @@ export default function App() {
                                         key={k}
                                         onClick={() => {
                                             playAlertBeep();
-                                            if (tagInput.length < 3) {
+                                            if (tagInput.length < 12) {
                                                 setTagInput(prev => prev + k);
                                             }
                                         }}
@@ -2910,7 +3090,7 @@ export default function App() {
                                         key={k}
                                         onClick={() => {
                                             playAlertBeep();
-                                            if (tagInput.length < 3) {
+                                            if (tagInput.length < 12) {
                                                 setTagInput(prev => prev + k);
                                             }
                                         }}
@@ -2927,7 +3107,7 @@ export default function App() {
                                         key={k}
                                         onClick={() => {
                                             playAlertBeep();
-                                            if (tagInput.length < 3) {
+                                            if (tagInput.length < 12) {
                                                 setTagInput(prev => prev + k);
                                             }
                                         }}
@@ -2954,7 +3134,7 @@ export default function App() {
                                         key={k}
                                         onClick={() => {
                                             playAlertBeep();
-                                            if (tagInput.length < 3) {
+                                            if (tagInput.length < 12) {
                                                 setTagInput(prev => prev + k);
                                             }
                                         }}
@@ -2980,61 +3160,78 @@ export default function App() {
                         <div className="w-full max-w-[320px] space-y-2">
                             <button 
                                 onClick={async () => {
-                                    if (tagInput.length !== 3) {
+                                    if (tagInput.length < 1 || tagInput.length > 12) {
                                         playAlertBeep();
-                                        addFloatNotif("TAG MUST BE EXACTLY 3 CHARACTERS");
+                                        addFloatNotif("TAG MUST BE BETWEEN 1 AND 12 CHARACTERS");
                                         return;
                                     }
                                     playAlertBeep();
-                                    setLeaderboardSubmitting(true);
-                                    try {
-                                        const success = await submitRanking({
-                                            player_tag: tagInput.toUpperCase(),
-                                            score: runScore,
-                                            highest_sector: level,
-                                            type: 'arcade'
-                                        });
-                                        if (success) {
-                                            playTransactionChord(); // Cash chime on success
-                                            setPilotTag(tagInput.toUpperCase());
-                                            setRunScore(0);
-                                            setShowTagPrompt(false);
-                                            addFloatNotif("RUN RECORD TRANSMITTED SUCCESSFULLY!");
-                                            if (prestigePending) {
-                                                setLevel(1);
-                                                setUpgrades({ 
-                                                    extraSparks: 0, 
-                                                    maxMagnetFuel: 0, 
-                                                    magnetPower: 0, 
-                                                    sparkRadiusBoost: 0, 
-                                                    specialSpawnRate: 0, 
-                                                    resonanceDuration: 0, 
-                                                    decayResist: 0, 
-                                                    comboShardMultiplier: 0, 
-                                                    magnetAutopilot: 0 
-                                                });
-                                                setShards(30);
-                                                setDarkMatter(dm => dm + 1);
-                                                setScreen('START');
-                                                setPrestigePending(false);
+                                    const uppercaseTag = tagInput.toUpperCase();
+                                    if (runScore > 0) {
+                                        setLeaderboardSubmitting(true);
+                                        try {
+                                            const success = await submitArcadeScore(runScore, uppercaseTag, level);
+                                            if (success) {
+                                                playTransactionChord(); // Cash chime on success
+                                                setPilotTag(uppercaseTag);
+                                                setRunScore(0);
+                                                setShowTagPrompt(false);
+                                                if (prestigePending) {
+                                                    setLevel(1);
+                                                    setUpgrades({ 
+                                                        extraSparks: 0, 
+                                                        maxMagnetFuel: 0, 
+                                                        magnetPower: 0, 
+                                                        sparkRadiusBoost: 0, 
+                                                        specialSpawnRate: 0, 
+                                                        resonanceDuration: 0, 
+                                                        decayResist: 0, 
+                                                        comboShardMultiplier: 0, 
+                                                        magnetAutopilot: 0 
+                                                    });
+                                                    setShards(30);
+                                                    setDarkMatter(dm => dm + 1);
+                                                    setScreen('START');
+                                                    setPrestigePending(false);
+                                                } else {
+                                                    // Load rankings overlay so they can admire it
+                                                    fetchRankings();
+                                                    setIsLeaderboardOpen(true);
+                                                }
                                             } else {
-                                                // Load rankings overlay so they can admire it
-                                                fetchRankings();
-                                                setIsLeaderboardOpen(true);
+                                                addFloatNotif("TRANSMISSION ERROR - PLEASE TRY AGAIN");
                                             }
-                                        } else {
-                                            addFloatNotif("TRANSMISSION ERROR - PLEASE TRY AGAIN");
+                                        } catch (e) {
+                                            console.error(e);
+                                            addFloatNotif("TRANSMISSION OFFLINE");
+                                        } finally {
+                                            setLeaderboardSubmitting(false);
                                         }
-                                    } catch (e) {
-                                        console.error(e);
-                                        addFloatNotif("TRANSMISSION OFFLINE");
-                                    } finally {
-                                        setLeaderboardSubmitting(false);
+                                    } else {
+                                        // Just save name locally
+                                        setPilotTag(uppercaseTag);
+                                        setShowTagPrompt(false);
+                                        playTransactionChord();
+                                        addFloatNotif("PILOT SIGNATURE UPDATED!");
+                                        
+                                        // Silently sync career standings to Supabase if totalScore is higher than careerScoreSubmitted
+                                        if (totalScore > careerScoreSubmitted) {
+                                            submitRanking({
+                                                player_tag: uppercaseTag,
+                                                score: totalScore,
+                                                highest_sector: level,
+                                                type: 'career'
+                                            }).then(success => {
+                                                if (success) {
+                                                    setCareerScoreSubmitted(totalScore);
+                                                }
+                                            });
+                                        }
                                     }
                                 }}
-                                disabled={tagInput.length !== 3 || leaderboardSubmitting}
+                                disabled={tagInput.length < 1 || leaderboardSubmitting}
                                 className={`w-full py-4 rounded-xl font-black text-sm flex items-center justify-center gap-1.5 uppercase transition-all cursor-pointer ${
-                                    tagInput.length === 3 && !leaderboardSubmitting
+                                    tagInput.length >= 1 && !leaderboardSubmitting
                                         ? 'bg-gradient-to-r from-cyan-500 to-indigo-500 hover:scale-103 active:scale-97 text-black shadow-[0_0_20px_rgba(6,182,212,0.3)]'
                                         : 'bg-zinc-800 text-zinc-550 border border-zinc-850 cursor-not-allowed'
                                 }`}
@@ -3047,7 +3244,7 @@ export default function App() {
                                 ) : (
                                     <>
                                         <Check className="w-4 h-4 text-black" />
-                                        TRANSMIT PILOT RECORD
+                                        {runScore > 0 ? "TRANSMIT PILOT RECORD" : "SAVE PILOT SIGNATURE"}
                                     </>
                                 )}
                             </button>
@@ -3056,7 +3253,7 @@ export default function App() {
                                 onClick={handleSkipTagPrompt}
                                 className="w-full bg-zinc-950 border border-zinc-850 hover:bg-zinc-900 text-zinc-500 py-3 rounded-xl font-bold text-xs uppercase tracking-wider active:scale-95 transition-all cursor-pointer"
                             >
-                                ❌ FORFEIT TRANSMISSION & ERASE CORE
+                                {runScore > 0 ? "❌ FORFEIT TRANSMISSION & ERASE CORE" : "✕ DISMISS SIGNATURE DECK"}
                             </button>
                         </div>
                     </div>
@@ -3178,9 +3375,9 @@ export default function App() {
                                                         </span>
 
                                                         {/* PILOT */}
-                                                        <span className={`col-span-3 text-left font-black uppercase tracking-wider ${
+                                                        <span className={`col-span-3 text-left font-black uppercase tracking-wider truncate pr-1 ${
                                                             isSelf ? 'text-white' : 'text-zinc-200'
-                                                        }`}>
+                                                        }`} title={entry.player_tag}>
                                                             {entry.player_tag}
                                                         </span>
 
